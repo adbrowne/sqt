@@ -44,6 +44,9 @@ User DSL → Parser → Logical IR → Optimizer → Physical IR → SQL for Tar
 
 ### Key Dependencies
 
+- **Salsa**: Incremental computation framework (enables fast recompilation and LSP)
+- **Rowan**: Lossless CST library (error-recovery parser foundation)
+- **tower-lsp**: Language Server Protocol implementation
 - **DataFusion**: SQL parsing, logical plan representation, optimizer framework
 - **DuckDB**: Local execution engine for testing (bundled, no system install needed)
 - **Arrow**: Data interchange format between components
@@ -71,6 +74,10 @@ The project uses concrete examples to discover the right optimizer API:
 2. **Cross-Model Optimization**: Can fuse or split queries across model boundaries
 3. **Multi-Backend**: Automatically distribute work across engines (e.g., DuckDB for small data, Databricks for large)
 4. **Proper Language**: No Jinja templates, proper compilation with type checking
+5. **First-Class Editor Support**: LSP with incremental compilation via Salsa
+   - Real-time diagnostics and completions
+   - Error-recovery parser handles partial/invalid code
+   - Incremental recompilation for fast feedback
 
 ## Development Workflow
 
