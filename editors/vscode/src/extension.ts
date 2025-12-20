@@ -99,10 +99,20 @@ function findSqtRoot(startPath: string): string | null {
         const cargoPath = path.join(currentPath, 'Cargo.toml');
         try {
             if (require('fs').existsSync(cargoPath)) {
-                // Check if this Cargo.toml contains sqt-lsp
                 const content = require('fs').readFileSync(cargoPath, 'utf-8');
+
+                // Check if this is the sqt project by looking for:
+                // 1. Direct mention of sqt-lsp in Cargo.toml, OR
+                // 2. Workspace with crates/sqt-lsp directory
                 if (content.includes('sqt-lsp')) {
                     return currentPath;
+                }
+
+                if (content.includes('[workspace]')) {
+                    const lspPath = path.join(currentPath, 'crates', 'sqt-lsp');
+                    if (require('fs').existsSync(lspPath)) {
+                        return currentPath;
+                    }
                 }
             }
         } catch (e) {
