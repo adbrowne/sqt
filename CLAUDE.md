@@ -37,6 +37,23 @@ cargo run -p sqt-lsp
 # (Configure your editor to use the LSP server, then open test-workspace/)
 ```
 
+### VSCode Extension
+```bash
+# Install and build the extension
+cd editors/vscode
+npm install
+npm run compile
+
+# Test in development mode
+# Open editors/vscode in VSCode and press F5 to launch Extension Host
+
+# Package as VSIX (requires Node 18+)
+npm run package
+
+# Watch mode (auto-recompile on changes)
+npm run watch
+```
+
 ## Architecture
 
 ### High-Level Design
@@ -88,6 +105,11 @@ The project uses concrete examples to discover the right optimizer API:
   - Diagnostics for undefined refs
   - Go-to-definition for `{{ ref() }}`
   - Full Salsa integration for incremental updates
+- `editors/vscode`: VSCode extension
+  - Language client that connects to sqt-lsp
+  - Syntax highlighting for SQL + templates
+  - Auto-activation when models/ directory detected
+  - See editors/vscode/README.md for installation
 
 ## Key Differentiators from dbt
 
