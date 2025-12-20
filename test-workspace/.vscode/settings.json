@@ -1,0 +1,7 @@
+{
+  "sqt.trace.server": "verbose",
+  "sqt.serverPath": "",
+  "files.associations": {
+    "*.sql": "sqt"
+  }
+}
