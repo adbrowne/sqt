@@ -6,7 +6,6 @@
 /// - Completions (future)
 /// - Hover information (future)
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -91,7 +90,11 @@ impl LanguageServer for Backend {
                         for entry in entries.flatten() {
                             let entry_path = entry.path();
                             if entry_path.extension().and_then(|s| s.to_str()) == Some("sql") {
-                                files.push(entry_path);
+                                // Read file content and set it in the database
+                                if let Ok(content) = std::fs::read_to_string(&entry_path) {
+                                    db.set_file_text(entry_path.clone(), Arc::new(content));
+                                    files.push(entry_path);
+                                }
                             }
                         }
 
