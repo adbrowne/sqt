@@ -21,9 +21,11 @@ A next-generation data pipeline tool designed to improve upon dbt by:
 # Build the entire workspace
 cargo build
 
-# Run a specific example
-cargo run --example example1_naive
-cargo run --example example1_optimized
+# Run examples
+cargo run --example example1_naive       # Common intermediate aggregation (naive)
+cargo run --example example1_optimized   # Common intermediate aggregation (optimized)
+cargo run --example example2_naive       # Split large GROUP BY (naive)
+cargo run --example example2_optimized   # Split large GROUP BY (optimized)
 
 # Build with bundled DuckDB (no system dependency required)
 cargo build  # bundled is default
@@ -59,8 +61,13 @@ The project uses concrete examples to discover the right optimizer API:
    - **Naive version** (`example1_naive.rs`): Three models computing sessions independently
    - **Optimized version** (`example1_optimized.rs`): Shared session computation
    - **Goal**: Extract patterns for detecting common intermediate aggregations
+   - **Type**: Transparent optimization (preserves exact results)
 
-2. **Example 2** (planned): Split large GROUP BY to reduce shuffle overhead
+2. **Example 2** (`crates/sqt-examples/examples/`):
+   - **Naive version** (`example2_naive.rs`): Large multi-dimensional GROUP BY with massive shuffle
+   - **Optimized version** (`example2_optimized.rs`): Split into independent dimensional queries
+   - **Goal**: Demonstrate when optimizations require user consent (lossy transformation)
+   - **Type**: Semantic optimization (changes result structure, requires consent)
 
 ### Crate Structure
 
