@@ -1,0 +1,518 @@
+/// Parser implementation with error recovery
+
+use crate::lexer::{tokenize, Token};
+use crate::syntax_kind::{SqtLanguage, SyntaxKind};
+use crate::SyntaxKind::*;
+use rowan::{GreenNode, GreenNodeBuilder, TextRange};
+
+/// Result of parsing
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parse {
+    pub green_node: GreenNode,
+    pub errors: Vec<ParseError>,
+}
+
+impl Parse {
+    pub fn syntax(&self) -> rowan::SyntaxNode<SqtLanguage> {
+        rowan::SyntaxNode::new_root(self.green_node.clone())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseError {
+    pub message: String,
+    pub range: TextRange,
+}
+
+/// Parse input text into a CST
+pub fn parse(input: &str) -> Parse {
+    let tokens = tokenize(input);
+    let mut parser = Parser::new(input, &tokens);
+    parser.parse_file();
+    parser.finish()
+}
+
+struct Parser<'a> {
+    input: &'a str,
+    tokens: &'a [Token],
+    pos: usize,
+    offset: usize,
+    builder: GreenNodeBuilder<'static>,
+    errors: Vec<ParseError>,
+}
+
+impl<'a> Parser<'a> {
+    fn new(input: &'a str, tokens: &'a [Token]) -> Self {
+        Self {
+            input,
+            tokens,
+            pos: 0,
+            offset: 0,
+            builder: GreenNodeBuilder::new(),
+            errors: Vec::new(),
+        }
+    }
+
+    fn finish(self) -> Parse {
+        Parse {
+            green_node: self.builder.finish(),
+            errors: self.errors,
+        }
+    }
+
+    /// Current token kind
+    fn current(&self) -> SyntaxKind {
+        self.tokens.get(self.pos).map(|t| t.kind).unwrap_or(EOF)
+    }
+
+    /// Check if at specific token kind
+    fn at(&self, kind: SyntaxKind) -> bool {
+        self.current() == kind
+    }
+
+    /// Check if at any of the given kinds
+    fn at_any(&self, kinds: &[SyntaxKind]) -> bool {
+        kinds.contains(&self.current())
+    }
+
+    /// Advance to next token, consuming trivia
+    fn advance(&mut self) {
+        if self.pos < self.tokens.len() {
+            let token = self.tokens[self.pos];
+            let text = &self.input[self.offset..self.offset + token.len];
+            self.builder.token(token.kind.into(), text);
+            self.offset += token.len;
+            self.pos += 1;
+        }
+    }
+
+    /// Skip trivia (whitespace, comments)
+    fn skip_trivia(&mut self) {
+        while self.current().is_trivia() {
+            self.advance();
+        }
+    }
+
+    /// Expect a specific token kind, report error if not present
+    fn expect(&mut self, kind: SyntaxKind) -> bool {
+        self.skip_trivia();
+        if self.at(kind) {
+            self.advance();
+            true
+        } else {
+            self.error(format!("Expected {:?}, found {:?}", kind, self.current()));
+            false
+        }
+    }
+
+    /// Start a composite node
+    fn start_node(&mut self, kind: SyntaxKind) {
+        self.builder.start_node(kind.into());
+    }
+
+    /// Finish current node
+    fn finish_node(&mut self) {
+        self.builder.finish_node();
+    }
+
+    /// Report a parse error
+    fn error(&mut self, message: String) {
+        let start = self.offset as u32;
+        let end = (self.offset + self.tokens.get(self.pos).map(|t| t.len).unwrap_or(0)) as u32;
+        self.errors.push(ParseError {
+            message,
+            range: TextRange::new(start.into(), end.into()),
+        });
+    }
+
+    /// Synchronize to one of the given tokens (error recovery)
+    fn sync_to(&mut self, kinds: &[SyntaxKind]) {
+        while !self.at(EOF) && !self.at_any(kinds) {
+            self.start_node(ERROR);
+            self.advance();
+            self.finish_node();
+        }
+    }
+
+    // ===== Parsing rules =====
+
+    fn parse_file(&mut self) {
+        self.start_node(FILE);
+
+        self.skip_trivia();
+
+        // Parse SELECT statement
+        if self.at(SELECT_KW) {
+            self.parse_select_stmt();
+        } else if !self.at(EOF) {
+            self.error("Expected SELECT statement".to_string());
+            self.sync_to(&[EOF]);
+        }
+
+        // Consume remaining trivia
+        while !self.at(EOF) {
+            self.advance();
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_select_stmt(&mut self) {
+        self.start_node(SELECT_STMT);
+
+        // SELECT
+        self.expect(SELECT_KW);
+
+        // Select list
+        self.parse_select_list();
+
+        // FROM clause
+        self.skip_trivia();
+        if self.at(FROM_KW) {
+            self.parse_from_clause();
+        }
+
+        // WHERE clause
+        self.skip_trivia();
+        if self.at(WHERE_KW) {
+            self.parse_where_clause();
+        }
+
+        // GROUP BY clause
+        self.skip_trivia();
+        if self.at(GROUP_KW) {
+            self.parse_group_by_clause();
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_select_list(&mut self) {
+        self.start_node(SELECT_LIST);
+        self.skip_trivia();
+
+        // Handle SELECT *
+        if self.at(STAR) {
+            self.start_node(SELECT_ITEM);
+            self.advance();
+            self.finish_node();
+        } else {
+            // Parse comma-separated select items
+            loop {
+                self.parse_select_item();
+
+                self.skip_trivia();
+                if self.at(COMMA) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_select_item(&mut self) {
+        self.start_node(SELECT_ITEM);
+        self.skip_trivia();
+
+        // Parse expression
+        self.parse_expression();
+
+        // Optional AS alias
+        self.skip_trivia();
+        if self.at(AS_KW) {
+            self.advance();
+            self.skip_trivia();
+            if self.at(IDENT) {
+                self.advance();
+            }
+        } else if self.at(IDENT) {
+            // Implicit alias (no AS keyword)
+            self.advance();
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_from_clause(&mut self) {
+        self.start_node(FROM_CLAUSE);
+
+        self.expect(FROM_KW);
+
+        // Parse table references (could be identifier or template)
+        loop {
+            self.parse_table_ref();
+
+            self.skip_trivia();
+            if self.at(COMMA) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_table_ref(&mut self) {
+        self.start_node(TABLE_REF);
+        self.skip_trivia();
+
+        if self.at(TEMPLATE_START) {
+            self.parse_template_expr();
+        } else if self.at(IDENT) {
+            // Parse qualified identifier (schema.table)
+            self.advance();
+            self.skip_trivia();
+            if self.at(DOT) {
+                self.advance();
+                self.skip_trivia();
+                self.expect(IDENT);
+            }
+        } else {
+            self.error("Expected table reference".to_string());
+        }
+
+        // Optional AS alias
+        self.skip_trivia();
+        if self.at(AS_KW) {
+            self.advance();
+            self.skip_trivia();
+            self.expect(IDENT);
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_template_expr(&mut self) {
+        self.start_node(TEMPLATE_EXPR);
+
+        if !self.expect(TEMPLATE_START) {
+            self.finish_node();
+            return;
+        }
+
+        self.skip_trivia();
+
+        // Parse template body (ref or config)
+        if self.at(REF_KW) {
+            self.parse_ref_call();
+        } else if self.at(CONFIG_KW) {
+            self.parse_config_call();
+        } else {
+            self.error("Expected 'ref' or 'config'".to_string());
+        }
+
+        self.skip_trivia();
+
+        if !self.expect(TEMPLATE_END) {
+            // Error recovery: sync to }} or EOF
+            self.sync_to(&[TEMPLATE_END, EOF]);
+            if self.at(TEMPLATE_END) {
+                self.advance();
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_ref_call(&mut self) {
+        self.start_node(REF_CALL);
+
+        self.expect(REF_KW);
+        self.skip_trivia();
+
+        if !self.expect(LPAREN) {
+            self.finish_node();
+            return;
+        }
+
+        self.skip_trivia();
+
+        if !self.at(STRING) {
+            self.error("Expected model name string".to_string());
+        } else {
+            self.advance();
+        }
+
+        self.skip_trivia();
+        self.expect(RPAREN);
+
+        self.finish_node();
+    }
+
+    fn parse_config_call(&mut self) {
+        self.start_node(CONFIG_CALL);
+
+        self.expect(CONFIG_KW);
+        self.skip_trivia();
+        self.expect(LPAREN);
+
+        // Parse config arguments (simplified for now)
+        while !self.at(RPAREN) && !self.at(EOF) {
+            self.advance();
+        }
+
+        self.expect(RPAREN);
+        self.finish_node();
+    }
+
+    fn parse_where_clause(&mut self) {
+        self.start_node(WHERE_CLAUSE);
+        self.expect(WHERE_KW);
+        self.parse_expression();
+        self.finish_node();
+    }
+
+    fn parse_group_by_clause(&mut self) {
+        self.start_node(GROUP_BY_CLAUSE);
+        self.expect(GROUP_KW);
+        self.expect(BY_KW);
+
+        // Parse comma-separated column list
+        loop {
+            self.parse_expression();
+
+            self.skip_trivia();
+            if self.at(COMMA) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_expression(&mut self) {
+        self.start_node(EXPRESSION);
+        self.skip_trivia();
+
+        self.parse_or_expr();
+
+        self.finish_node();
+    }
+
+    fn parse_or_expr(&mut self) {
+        self.parse_and_expr();
+
+        while self.at(OR_KW) {
+            self.start_node(BINARY_EXPR);
+            self.advance();
+            self.skip_trivia();
+            self.parse_and_expr();
+            self.finish_node();
+        }
+    }
+
+    fn parse_and_expr(&mut self) {
+        self.parse_comparison_expr();
+
+        while self.at(AND_KW) {
+            self.start_node(BINARY_EXPR);
+            self.advance();
+            self.skip_trivia();
+            self.parse_comparison_expr();
+            self.finish_node();
+        }
+    }
+
+    fn parse_comparison_expr(&mut self) {
+        self.parse_additive_expr();
+
+        while self.at_any(&[EQ, NE, LT, GT, LE, GE]) {
+            self.start_node(BINARY_EXPR);
+            self.advance();
+            self.skip_trivia();
+            self.parse_additive_expr();
+            self.finish_node();
+        }
+    }
+
+    fn parse_additive_expr(&mut self) {
+        self.parse_multiplicative_expr();
+
+        while self.at_any(&[PLUS, MINUS]) {
+            self.start_node(BINARY_EXPR);
+            self.advance();
+            self.skip_trivia();
+            self.parse_multiplicative_expr();
+            self.finish_node();
+        }
+    }
+
+    fn parse_multiplicative_expr(&mut self) {
+        self.parse_primary_expr();
+
+        while self.at_any(&[STAR, DIVIDE]) {
+            self.start_node(BINARY_EXPR);
+            self.advance();
+            self.skip_trivia();
+            self.parse_primary_expr();
+            self.finish_node();
+        }
+    }
+
+    fn parse_primary_expr(&mut self) {
+        self.skip_trivia();
+
+        if self.at(LPAREN) {
+            // Parenthesized expression or function call
+            let checkpoint = self.pos;
+            self.advance();
+            self.skip_trivia();
+
+            // Check if it's a function call (preceded by identifier)
+            // For now, just parse as grouped expression
+            self.parse_expression();
+            self.skip_trivia();
+            self.expect(RPAREN);
+        } else if self.at(IDENT) {
+            // Could be column reference or function call
+            self.advance();
+            self.skip_trivia();
+
+            if self.at(LPAREN) {
+                // Function call
+                self.start_node(FUNCTION_CALL);
+                self.parse_arg_list();
+                self.finish_node();
+            } else if self.at(DOT) {
+                // Qualified name (table.column)
+                self.advance();
+                self.skip_trivia();
+                self.expect(IDENT);
+            }
+        } else if self.current().is_literal() {
+            self.advance();
+        } else if self.at(STAR) {
+            self.advance();
+        } else {
+            self.error(format!("Expected expression, found {:?}", self.current()));
+        }
+    }
+
+    fn parse_arg_list(&mut self) {
+        self.start_node(ARG_LIST);
+        self.expect(LPAREN);
+        self.skip_trivia();
+
+        if !self.at(RPAREN) {
+            loop {
+                self.parse_expression();
+
+                self.skip_trivia();
+                if self.at(COMMA) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        self.expect(RPAREN);
+        self.finish_node();
+    }
+}

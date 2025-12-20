@@ -14,7 +14,8 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tokio::sync::Mutex;
 
-use sqt_db::{Database, Diagnostic as DbDiagnostic, DiagnosticSeverity as DbSeverity, Inputs, Semantic};
+use sqt_db::{Database, Diagnostic as DbDiagnostic, DiagnosticSeverity as DbSeverity, Inputs, Semantic, Syntax};
+use sqt_parser::ast::File as AstFile;
 
 struct Backend {
     client: Client,
@@ -34,12 +35,12 @@ impl Backend {
         lsp_types::Diagnostic {
             range: Range {
                 start: Position {
-                    line: diag.line,
-                    character: diag.column,
+                    line: diag.range.start.line,
+                    character: diag.range.start.column,
                 },
                 end: Position {
-                    line: diag.line,
-                    character: diag.column + 1,
+                    line: diag.range.end.line,
+                    character: diag.range.end.column,
                 },
             },
             severity: Some(match diag.severity {
@@ -175,34 +176,54 @@ impl LanguageServer for Backend {
 
         let db = self.db.lock().await;
 
-        // Get file content
+        // Get file content and parse tree
         let text = db.file_text(path.clone());
+        let parse = db.parse_file(path.clone());
+        let syntax = parse.syntax();
 
-        // Find ref() at cursor position
-        // Very naive implementation - just find ref at the line
-        let lines: Vec<&str> = text.lines().collect();
-        if position.line as usize >= lines.len() {
-            return Ok(None);
-        }
+        // Convert cursor position to offset
+        let cursor_offset = {
+            let mut offset = 0usize;
+            let mut line = 0u32;
+            let mut col = 0u32;
 
-        let line = lines[position.line as usize];
+            for ch in text.chars() {
+                if line == position.line && col == position.character {
+                    break;
+                }
+                if ch == '\n' {
+                    line += 1;
+                    col = 0;
+                } else {
+                    col += 1;
+                }
+                offset += ch.len_utf8();
+            }
+            offset
+        };
 
-        // Look for {{ ref('...') }} pattern around cursor
-        if let Some(start) = line.find("{{ ref('") {
-            let after_ref = &line[start + 8..];
-            if let Some(end) = after_ref.find("')") {
-                let ref_name = &after_ref[..end];
+        // Find RefCall at cursor position using AST
+        if let Some(file) = AstFile::cast(syntax) {
+            for ref_call in file.refs() {
+                let range = ref_call.range();
+                let start: usize = range.start().into();
+                let end: usize = range.end().into();
 
-                // Resolve the ref
-                if let Some(target_path) = db.resolve_ref(ref_name.to_string()) {
-                    if let Ok(target_uri) = Url::from_file_path(&target_path) {
-                        return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                            uri: target_uri,
-                            range: Range {
-                                start: Position::new(0, 0),
-                                end: Position::new(0, 0),
-                            },
-                        })));
+                // Check if cursor is within this ref call
+                if cursor_offset >= start && cursor_offset <= end {
+                    if let Some(ref_name) = ref_call.model_name() {
+                        // Resolve the ref
+                        if let Some(target_path) = db.resolve_ref(ref_name) {
+                            if let Ok(target_uri) = Url::from_file_path(&target_path) {
+                                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                                    uri: target_uri,
+                                    range: Range {
+                                        start: Position::new(0, 0),
+                                        end: Position::new(0, 0),
+                                    },
+                                })));
+                            }
+                        }
                     }
                 }
             }

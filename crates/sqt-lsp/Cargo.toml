@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 sqt-db = { path = "../sqt-db" }
+sqt-parser = { path = "../sqt-parser" }
 
 tower-lsp.workspace = true
 lsp-types.workspace = true

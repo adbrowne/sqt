@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use sqt_parser::{self, File as AstFile};
+
 /// Input queries - these are set by the LSP when files change
 #[salsa::query_group(InputsStorage)]
 pub trait Inputs {
@@ -23,12 +25,15 @@ pub trait Inputs {
 /// Syntax queries - parsing and CST construction
 #[salsa::query_group(SyntaxStorage)]
 pub trait Syntax: Inputs {
+    /// Parse a file into a CST
+    fn parse_file(&self, path: PathBuf) -> Arc<sqt_parser::Parse>;
+
     /// Parse a file and extract model definitions
     /// Returns None if file doesn't contain a valid model
     fn parse_model(&self, path: PathBuf) -> Option<Arc<Model>>;
 
-    /// Extract all ref() calls from a model
-    fn model_refs(&self, path: PathBuf) -> Arc<Vec<String>>;
+    /// Extract all ref() calls from a model with their positions
+    fn model_refs(&self, path: PathBuf) -> Arc<Vec<RefLocation>>;
 
     /// Get all models in the project
     fn all_models(&self) -> Arc<HashMap<PathBuf, Model>>;
@@ -56,20 +61,25 @@ impl salsa::Database for Database {}
 
 // Query implementations
 
+fn parse_file(db: &dyn Syntax, path: PathBuf) -> Arc<sqt_parser::Parse> {
+    let text = db.file_text(path);
+    Arc::new(sqt_parser::parse(&text))
+}
+
 fn parse_model(db: &dyn Syntax, path: PathBuf) -> Option<Arc<Model>> {
-    let text = db.file_text(path.clone());
-
-    // Very simple parser for now - just look for {{ ref() }} patterns
-    // TODO: Replace with proper Rowan-based parser
-
     // Extract model name from file path (e.g., models/users.sql -> users)
     let model_name = path
         .file_stem()?
         .to_str()?
         .to_string();
 
-    // Check if file contains SQL (very naive check)
-    if !text.contains("SELECT") && !text.contains("select") {
+    // Parse file and check if it contains a valid SELECT statement
+    let parse = db.parse_file(path.clone());
+    let syntax = parse.syntax();
+    let file = AstFile::cast(syntax)?;
+
+    // Check if file has a SELECT statement
+    if file.select_stmt().is_none() {
         return None;
     }
 
@@ -79,28 +89,28 @@ fn parse_model(db: &dyn Syntax, path: PathBuf) -> Option<Arc<Model>> {
     }))
 }
 
-fn model_refs(db: &dyn Syntax, path: PathBuf) -> Arc<Vec<String>> {
+fn model_refs(db: &dyn Syntax, path: PathBuf) -> Arc<Vec<RefLocation>> {
+    let parse = db.parse_file(path.clone());
     let text = db.file_text(path);
+    let syntax = parse.syntax();
 
-    // Extract {{ ref('...') }} patterns
-    // Very naive regex-like parsing for now
-    let mut refs = Vec::new();
-    let text_str = text.as_str();
+    // Use AST to extract all ref calls with positions
+    if let Some(file) = AstFile::cast(syntax) {
+        let refs: Vec<RefLocation> = file
+            .refs()
+            .filter_map(|ref_call| {
+                let name = ref_call.model_name()?;
+                let text_range = ref_call.name_range().unwrap_or(ref_call.range());
+                let range = sqt_parser::ast::text_range_to_range(&text, text_range);
 
-    let mut pos = 0;
-    while let Some(start) = text_str[pos..].find("{{ ref('") {
-        let abs_start = pos + start + 8; // After "{{ ref('"
+                Some(RefLocation { name, range })
+            })
+            .collect();
 
-        if let Some(end) = text_str[abs_start..].find("')") {
-            let ref_name = &text_str[abs_start..abs_start + end];
-            refs.push(ref_name.to_string());
-            pos = abs_start + end + 2;
-        } else {
-            break;
-        }
+        Arc::new(refs)
+    } else {
+        Arc::new(Vec::new())
     }
-
-    Arc::new(refs)
 }
 
 fn all_models(db: &dyn Syntax) -> Arc<HashMap<PathBuf, Model>> {
@@ -128,6 +138,19 @@ fn resolve_ref(db: &dyn Semantic, model_name: String) -> Option<PathBuf> {
 fn file_diagnostics(db: &dyn Semantic, path: PathBuf) -> Arc<Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
 
+    // Add parse errors
+    let parse = db.parse_file(path.clone());
+    for error in parse.errors.iter() {
+        let text = db.file_text(path.clone());
+        let range = sqt_parser::ast::text_range_to_range(&text, error.range);
+
+        diagnostics.push(Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            message: error.message.clone(),
+            range,
+        });
+    }
+
     // Check if model is valid
     if db.parse_model(path.clone()).is_none() {
         // Only report error if file is supposed to be a model (in models/ directory)
@@ -135,22 +158,23 @@ fn file_diagnostics(db: &dyn Semantic, path: PathBuf) -> Arc<Vec<Diagnostic>> {
             diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,
                 message: "File does not contain a valid SQL query".to_string(),
-                line: 0,
-                column: 0,
+                range: Range {
+                    start: Position { line: 0, column: 0 },
+                    end: Position { line: 0, column: 0 },
+                },
             });
         }
         return Arc::new(diagnostics);
     }
 
-    // Check for undefined refs
+    // Check for undefined refs with accurate positions
     let refs = db.model_refs(path.clone());
-    for ref_name in refs.iter() {
-        if db.resolve_ref(ref_name.clone()).is_none() {
+    for ref_loc in refs.iter() {
+        if db.resolve_ref(ref_loc.name.clone()).is_none() {
             diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Error,
-                message: format!("Undefined model reference: '{}'", ref_name),
-                line: 0, // TODO: Track actual line numbers
-                column: 0,
+                message: format!("Undefined model reference: '{}'", ref_loc.name),
+                range: ref_loc.range,
             });
         }
     }
@@ -165,13 +189,25 @@ pub struct Model {
     pub path: PathBuf,
 }
 
+/// Reference location with position information
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefLocation {
+    pub name: String,
+    pub range: Range,
+}
+
+/// Position in a file (line, column)
+pub type Position = sqt_parser::ast::Position;
+
+/// Range in a file (start, end)
+pub type Range = sqt_parser::ast::Range;
+
 /// Represents a diagnostic (error, warning, info)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
     pub message: String,
-    pub line: u32,
-    pub column: u32,
+    pub range: Range,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

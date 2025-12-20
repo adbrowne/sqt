@@ -14,6 +14,8 @@ A next-generation data pipeline tool designed to improve upon dbt by:
 
 **Current Phase**: Example-driven API design - building concrete optimization examples first to inform the optimizer API.
 
+**Project Status**: Early-stage development - no backward compatibility constraints. The codebase is evolving rapidly and breaking changes are expected.
+
 ## Commands
 
 ### Build and Test
@@ -67,6 +69,27 @@ User DSL → Parser → Logical IR → Optimizer → Physical IR → SQL for Tar
 - **Physical IR**: Represents HOW to execute (engine selection, materialization decisions)
 - **Optimizer**: Transforms logical IR into optimized physical IR while preserving correctness
 
+### Parser Architecture
+
+The parser is separated into reusable layers:
+```
+sqt-parser (pure parser)  →  sqt-db (Salsa queries)  →  sqt-lsp (LSP server)
+                          ↘  sqt-optimizer (future)
+                          ↘  sqt-cli (future)
+```
+
+- **sqt-parser**: Standalone Rowan-based parser (no Salsa dependency)
+  - Pure function: text → CST with error recovery
+  - Reusable in any context (LSP, optimizer, CLI)
+  - Fast one-shot parsing for non-incremental use cases
+
+- **sqt-db**: Salsa wrapper around sqt-parser
+  - Incremental compilation for LSP responsiveness
+  - Caches parse results and derived queries
+  - Automatic invalidation when files change
+
+This separation allows the LSP to get incremental parsing via Salsa, while the optimizer and CLI can use fast one-shot parsing directly from sqt-parser.
+
 ### Key Dependencies
 
 - **Salsa**: Incremental computation framework (enables fast recompilation and LSP)
@@ -94,16 +117,22 @@ The project uses concrete examples to discover the right optimizer API:
 
 ### Crate Structure
 
+- `sqt-parser`: Rowan-based error-recovery parser (standalone, reusable)
+  - Lexer: Tokenizes SQL + template expressions (`{{ ref() }}`, `{{ config() }}`)
+  - Parser: Recursive descent parser with error recovery at sync points
+  - AST: Typed wrappers over Rowan CST for convenient traversal
+  - Parses minimal SQL structure: SELECT, FROM, WHERE, GROUP BY, expressions, functions
+  - Position tracking: Accurate line/column information for diagnostics and goto-definition
 - `sqt-examples`: Concrete optimization examples used to drive API design
   - `src/utils.rs`: Shared utilities for DuckDB execution and pretty printing
   - `examples/`: Runnable examples comparing naive vs optimized approaches
-- `sqt-db`: Salsa database with incremental queries
+- `sqt-db`: Salsa database with incremental queries (wraps sqt-parser for incremental compilation)
   - Input queries: `file_text()`, `all_files()`
-  - Syntax queries: `parse_model()`, `model_refs()`
-  - Semantic queries: `resolve_ref()`, `file_diagnostics()`
+  - Syntax queries: `parse_file()`, `parse_model()`, `model_refs()` (with positions)
+  - Semantic queries: `resolve_ref()`, `file_diagnostics()` (with accurate positions)
 - `sqt-lsp`: Language Server Protocol implementation
-  - Diagnostics for undefined refs
-  - Go-to-definition for `{{ ref() }}`
+  - Diagnostics for undefined refs and parse errors (with accurate positions)
+  - Go-to-definition for `{{ ref() }}` using CST position tracking
   - Full Salsa integration for incremental updates
 - `editors/vscode`: VSCode extension
   - Language client that connects to sqt-lsp

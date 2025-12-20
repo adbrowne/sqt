@@ -1,11 +1,9 @@
 [package]
-name = "sqt-db"
+name = "sqt-parser"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
 [dependencies]
-salsa.workspace = true
-anyhow.workspace = true
-sqt-parser = { path = "../sqt-parser" }
+rowan.workspace = true
