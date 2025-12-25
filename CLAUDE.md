@@ -12,9 +12,32 @@ A next-generation data pipeline tool designed to improve upon dbt by:
 - Supporting multi-backend execution (DuckDB, Databricks, etc.)
 - Using a proper language instead of Jinja templates
 
-**Current Phase**: Example-driven API design - building concrete optimization examples first to inform the optimizer API.
+**Current Phase**: Parser and LSP implementation - Phases 1 & 2 complete (sqt.ref() with named parameters).
 
 **Project Status**: Early-stage development - no backward compatibility constraints. The codebase is evolving rapidly and breaking changes are expected.
+
+## Key Documentation
+
+- **README.md**: Full language specification and design decisions
+  - Two-layer DSL architecture (Metrics DSL + SQL models)
+  - Type system design
+  - Extension syntax (`sqt.ref()`, `sqt.metric()` with `=>` parameters)
+  - Computation requirements (stateless, windowed, sessionized, etc.)
+  - Backend capabilities and rewrite rules
+  - Incrementalization and optimization strategy
+
+- **ROADMAP.md**: Implementation status and next steps
+  - Track completed phases with commit hashes
+  - Document deferred work with rationale
+  - Propose concrete next-step options
+  - **Update after completing phases or making architectural decisions**
+
+- **docs/**: Architecture and design documentation
+  - `architecture_overview.md`: System design and component interactions
+  - `lsp_architecture.md`: LSP implementation details
+  - `lsp_quickstart.md`: Getting started with the LSP
+  - `example1_insights.md`, `example2_insights.md`: Optimization pattern analysis
+  - `optimization_rule_api_design.md`: Future optimizer API design
 
 ## Commands
 
@@ -118,10 +141,11 @@ The project uses concrete examples to discover the right optimizer API:
 ### Crate Structure
 
 - `sqt-parser`: Rowan-based error-recovery parser (standalone, reusable)
-  - Lexer: Tokenizes SQL + template expressions (`{{ ref() }}`, `{{ config() }}`)
+  - Lexer: Tokenizes SQL + sqt extensions (`sqt.ref()`, `sqt.metric()`, `=>` operator)
   - Parser: Recursive descent parser with error recovery at sync points
   - AST: Typed wrappers over Rowan CST for convenient traversal
-  - Parses minimal SQL structure: SELECT, FROM, WHERE, GROUP BY, expressions, functions
+  - Parses SQL structure: SELECT, FROM, WHERE, GROUP BY, expressions, functions
+  - Named parameters: Handles `param => value` syntax in function calls
   - Position tracking: Accurate line/column information for diagnostics and goto-definition
 - `sqt-examples`: Concrete optimization examples used to drive API design
   - `src/utils.rs`: Shared utilities for DuckDB execution and pretty printing
@@ -132,7 +156,8 @@ The project uses concrete examples to discover the right optimizer API:
   - Semantic queries: `resolve_ref()`, `file_diagnostics()` (with accurate positions)
 - `sqt-lsp`: Language Server Protocol implementation
   - Diagnostics for undefined refs and parse errors (with accurate positions)
-  - Go-to-definition for `{{ ref() }}` using CST position tracking
+  - Go-to-definition for `sqt.ref()` using CST position tracking
+  - Extracts named parameters from ref calls for future validation
   - Full Salsa integration for incremental updates
 - `editors/vscode`: VSCode extension
   - Language client that connects to sqt-lsp
@@ -154,11 +179,39 @@ The project uses concrete examples to discover the right optimizer API:
 
 ## Development Workflow
 
+### For Parser/LSP Features
+
+1. Review the spec in README.md for requirements
+2. Implement parser changes (lexer → syntax → parser → AST)
+3. Update sqt-db queries if needed (usually automatic via AST)
+4. Update LSP features if needed (diagnostics, goto-definition, etc.)
+5. Test with test-workspace models
+6. Update ROADMAP.md with completion status and commit hash
+7. Commit with descriptive message
+
+### For Optimizer Features (Future)
+
 1. Start with concrete examples showing optimization opportunities
 2. Manually write both naive and optimized versions
 3. Analyze what the optimizer needs to detect and transform
 4. Extract API patterns from successful optimizations
 5. Generalize into optimizer framework
+
+## Maintaining ROADMAP.md
+
+**When to update:**
+- After completing a phase (mark as ✅ with commit hash)
+- When deferring work (mark as ⏸️ with rationale)
+- When proposing new next steps (add as Option)
+- When making architectural decisions (document reasoning)
+
+**Format:**
+- Use ✅ for completed phases
+- Use ⏸️ for deferred work
+- Use 🔄 for in-progress work
+- Use 🔮 for future/speculative work
+- Always include commit hashes for completed work
+- Always explain why work is deferred
 
 ## License
 
