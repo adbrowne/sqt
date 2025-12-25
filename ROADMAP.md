@@ -69,7 +69,7 @@ sqt run --dry-run                 # Validate without executing
 
 ## ✅ Phase 3: CLI and DuckDB Execution (COMPLETED)
 
-**Commit**: `[current]` - "Implement sqt run CLI with DuckDB execution"
+**Commit**: `4402476` - "Implement sqt run CLI with DuckDB execution (Phase 3)"
 
 ### What Was Implemented
 
