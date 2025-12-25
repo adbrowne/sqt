@@ -4,13 +4,21 @@ This document tracks the implementation status of the sqt parser and LSP, aligne
 
 ## Current Status
 
-**Phases 1 & 2 Complete**: Basic `sqt.ref()` syntax with named parameters fully implemented.
+**Phases 1, 2, & 3 Complete**: Parser, LSP, and CLI with DuckDB execution fully implemented.
 
 ```sql
--- ✅ Supported syntax
+-- ✅ Supported syntax (parser & LSP)
 SELECT * FROM sqt.ref('model_name')
 SELECT * FROM sqt.ref('events', filter => date > '2024-01-01')
 SELECT * FROM sqt.ref('orders', filter => status = 'active', limit => 100)
+```
+
+```bash
+# ✅ Supported CLI commands
+sqt run                           # Execute all models
+sqt run --show-results            # Preview query results
+sqt run --verbose                 # Show compiled SQL
+sqt run --dry-run                 # Validate without executing
 ```
 
 ---
@@ -59,7 +67,90 @@ SELECT * FROM sqt.ref('orders', filter => status = 'active', limit => 100)
 
 ---
 
-## ⏸️ Phase 3: sqt.metric() Support (DEFERRED)
+## ✅ Phase 3: CLI and DuckDB Execution (COMPLETED)
+
+**Commit**: `[current]` - "Implement sqt run CLI with DuckDB execution"
+
+### What Was Implemented
+
+- New `sqt-cli` crate with `sqt run` command
+- DuckDB-based model execution with file-based database persistence
+- YAML configuration (`sqt.yml` and `sources.yml`)
+- Model discovery from `models/` directory
+- Dependency graph construction with topological sort
+- SQL compilation (replacing `sqt.ref()` with table references)
+- Table and view materialization strategies
+- Source table validation
+- Named parameter detection with clear error messages
+- Test workspace configuration for end-to-end testing
+
+### Key Features
+
+- **CLI**: Full-featured command-line interface using `clap`
+  - `sqt run` - Execute models and materialize in DuckDB
+  - `--project-dir` - Specify project root
+  - `--database` - Custom database file path
+  - `--show-results` - Preview query results
+  - `--verbose` - Show compiled SQL
+  - `--dry-run` - Validate without executing
+
+- **Configuration**: YAML-based project configuration
+  - `sqt.yml` - Project settings, targets, model materialization
+  - `sources.yml` - External source table definitions
+
+- **Execution Engine**:
+  - Dependency resolution with cycle detection
+  - Topological sort for correct execution order
+  - Both CREATE TABLE AS and CREATE VIEW support
+  - Row counts and timing statistics
+  - Pretty-printed result preview using Arrow
+
+- **Error Handling**:
+  - Clear error messages with file/line/column positions
+  - Named parameter detection with helpful error messages
+  - Undefined reference validation
+  - Circular dependency detection
+  - Source table validation
+
+### Implementation Details
+
+**New Files**:
+- `crates/sqt-cli/Cargo.toml` - CLI crate definition
+- `crates/sqt-cli/src/main.rs` - Entry point and orchestration
+- `crates/sqt-cli/src/lib.rs` - Public API
+- `crates/sqt-cli/src/config.rs` - YAML configuration parsing
+- `crates/sqt-cli/src/discovery.rs` - Model file discovery
+- `crates/sqt-cli/src/graph.rs` - Dependency graph and topological sort
+- `crates/sqt-cli/src/compiler.rs` - SQL compilation (ref replacement)
+- `crates/sqt-cli/src/executor.rs` - DuckDB execution engine
+- `crates/sqt-cli/src/errors.rs` - Custom error types
+
+**Test Configuration**:
+- `test-workspace/sqt.yml` - Example project configuration
+- `test-workspace/sources.yml` - Source table definitions
+- `test-workspace/setup_sources.sql` - Sample data generation
+
+### Limitations (By Design)
+
+- Named parameters in `sqt.ref()` are detected but not yet compiled
+  - Gives clear error: "named parameters which are not yet supported"
+  - Can be implemented in future phase
+- No incremental materialization (always full refresh)
+- Single-threaded execution (no parallel model execution)
+- DuckDB only (multi-backend support deferred)
+
+### Test Results
+
+Successfully executed test-workspace models:
+- `raw_events` - 100 rows (table)
+- `user_sessions` - 33 rows (view)
+- `user_stats` - 10 rows (table)
+
+All executed in ~8ms with correct dependency resolution.
+
+---
+
+## ⏸️ Phase 4: sqt.metric() Support (DEFERRED)
 
 **Status**: Deferred until metrics DSL design is finalized
 
@@ -83,24 +174,44 @@ Can follow similar pattern to RefCall implementation:
 
 ## Next Steps (Choose One)
 
-### Option A: Improve Parameter Validation ⭐ Recommended
+### Option A: Named Parameter Compilation ⭐ Recommended
 
-**Value**: Make named parameters more useful immediately
+**Value**: Make named parameters functional in CLI execution
 
 **Work**:
-1. Define allowed parameters for `sqt.ref()` per spec:
-   - `filter`, `partitions`, `sample`, `max_staleness`, `as_of`, `version`, etc.
-2. Add LSP diagnostics for unknown parameters
-3. Add LSP autocomplete for parameter names
-4. Add hover documentation for each parameter
+1. Implement `filter =>` parameter compilation in `sqt-cli/src/compiler.rs`:
+   - Parse filter expression from named parameter
+   - Inject as WHERE clause in compiled SQL
+   - Combine with existing WHERE clauses using AND
+2. Add tests for filter parameter compilation
+3. Update test-workspace to use parameterized refs
+4. Add LSP validation for parameter types
 
-**Effort**: Low-Medium (LSP-focused, no parser changes)
+**Effort**: Medium (requires SQL AST manipulation)
 
-**Files**: `crates/sqt-lsp/src/main.rs`, `crates/sqt-db/src/lib.rs`
+**Files**: `crates/sqt-cli/src/compiler.rs`, `crates/sqt-lsp/src/main.rs`
+
+**Value**: Unlocks the full power of `sqt.ref()` parameters for filtering, partitioning, etc.
 
 ---
 
-### Option B: Column Schema Tracking
+### Option B: Incremental Materialization
+
+**Value**: Faster execution by only recomputing changed data
+
+**Work**:
+1. Track model state (last run timestamp, row counts)
+2. Detect incremental-safe models (append-only, time-based filters)
+3. Generate incremental SQL (INSERT INTO ... WHERE timestamp > last_run)
+4. Handle failures and full refresh scenarios
+
+**Effort**: Medium-High (requires state management)
+
+**Files**: `crates/sqt-cli/src/executor.rs`, new state tracking module
+
+---
+
+### Option C: Column Schema Tracking
 
 **Value**: Enable smarter LSP features (autocomplete, validation)
 
