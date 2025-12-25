@@ -1,7 +1,7 @@
 {
-  "sqt.trace.server": "verbose",
-  "sqt.serverPath": "",
+  "smelt.trace.server": "verbose",
+  "smelt.serverPath": "",
   "files.associations": {
-    "*.sql": "sqt"
+    "*.sql": "smelt"
   }
 }

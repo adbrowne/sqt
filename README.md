@@ -1,13 +1,13 @@
-# sqt
-Semantic Query Tool
+# smelt
+Modern data transformation framework
 
 Andrew's Christmas 2025 holiday project.
 
-# sqt (Semantic Query Transformation) - Design Specification
+# smelt (Smelt) - Design Specification
 
 ## Overview
 
-sqt is a data transformation framework that separates **logical transformation definitions** from **physical execution planning**. Unlike traditional tools like dbt that use SQL templates, sqt parses and understands the semantics of transformations, enabling advanced capabilities like automatic refactoring, cross-engine deployment, and intelligent incrementalization.
+smelt is a data transformation framework that separates **logical transformation definitions** from **physical execution planning**. Unlike traditional tools like dbt that use SQL templates, smelt parses and understands the semantics of transformations, enabling advanced capabilities like automatic refactoring, cross-engine deployment, and intelligent incrementalization.
 
 ### Core Philosophy
 
@@ -17,7 +17,7 @@ sqt is a data transformation framework that separates **logical transformation d
 
 ### Key Differentiators from dbt
 
-| Aspect | dbt | sqt |
+| Aspect | dbt | smelt |
 |--------|-----|-----|
 | Model definition | Jinja templates | Parsed semantic models |
 | Type checking | None (runtime errors) | Static analysis with LSP support |
@@ -65,15 +65,15 @@ Model and metric references use a function-like syntax with the `sqt.` namespace
 
 ```sql
 -- Model references
-SELECT * FROM sqt.ref('upstream_model')
+SELECT * FROM smelt.ref('upstream_model')
 
 -- With parameters using => for named arguments (SQL:2003 standard)
-SELECT * FROM sqt.ref('upstream_model', filter => event_date > '2024-01-01')
+SELECT * FROM smelt.ref('upstream_model', filter => event_date > '2024-01-01')
 
 -- Metric references
 SELECT 
   user_id,
-  sqt.metric('monthly_active_users', at => event_date) as mau
+  smelt.metric('monthly_active_users', at => event_date) as mau
 FROM events
 ```
 
@@ -96,7 +96,7 @@ FROM events
 ### Reference Parameters
 
 ```sql
-sqt.ref('model',
+smelt.ref('model',
   -- Data filtering
   filter => <expr>,              -- Pushdown predicate
   partitions => ['2024-01'],     -- Explicit partition list
@@ -113,7 +113,7 @@ sqt.ref('model',
   inline => true                 -- Don't materialize, inline SQL
 )
 
-sqt.metric('metric_name',
+smelt.metric('metric_name',
   at => event_date,              -- Point-in-time evaluation
   for => user_id,                -- Entity to compute for
   grain => 'daily',              -- Rollup level
@@ -154,7 +154,7 @@ metric first_touch_attribution:
 
 ### Layer 2: SQL Models (Expressive, Familiar)
 
-Use standard SQL with sqt extensions to compose metrics and build complex transformations.
+Use standard SQL with smelt extensions to compose metrics and build complex transformations.
 
 ```sql
 -- Model: daily_user_stats
@@ -164,9 +164,9 @@ Use standard SQL with sqt extensions to compose metrics and build complex transf
 SELECT 
   event_date,
   user_id,
-  sqt.metric('revenue', at => event_date) as daily_revenue,
-  sqt.metric('monthly_active_users', at => event_date) as mau_at_date
-FROM sqt.ref('events')
+  smelt.metric('revenue', at => event_date) as daily_revenue,
+  smelt.metric('monthly_active_users', at => event_date) as mau_at_date
+FROM smelt.ref('events')
 GROUP BY 1, 2
 ```
 
@@ -215,7 +215,7 @@ SELECT CAST(a AS INT) + b FROM t  -- Explicit, correct
 
 ### SQL Mistakes to Avoid
 
-| SQL Problem | sqt Approach |
+| SQL Problem | smelt Approach |
 |-------------|--------------|
 | NULL = NULL is NULL | Require explicit IS NULL checks |
 | Implicit type coercion | Require explicit CAST |
@@ -363,7 +363,7 @@ Unlike ad-hoc query optimization, ETL has different constraints:
 
 1. **Pre-run analysis**
    ```bash
-   sqt optimize --model daily_stats --budget 4h --sample-data s3://...
+   smelt optimize --model daily_stats --budget 4h --sample-data s3://...
    # Outputs learned configuration to .sqt/optimizations/
    ```
 
@@ -412,7 +412,7 @@ ROW_NUMBER() OVER (PARTITION BY user_id, batch_date ORDER BY ts)
 ┌─────────────────────────────────────────┐
 │  Logical Model (analyst)                │
 │  - Pure business logic                  │
-│  - SQL + sqt.ref/sqt.metric             │
+│  - SQL + smelt.ref/smelt.metric             │
 │  - No execution hints                   │
 └─────────────────────────────────────────┘
                     │
@@ -469,7 +469,7 @@ Recommendation: Start with Option A for simplicity, add Option B when needed.
 
 ### Design: Framework Does NOT Manage State
 
-sqt generates artifacts for target engines to manage state natively. It does NOT implement its own state storage.
+smelt generates artifacts for target engines to manage state natively. It does NOT implement its own state storage.
 
 | Pattern | Databricks/Spark | Flink | Postgres |
 |---------|------------------|-------|----------|
@@ -537,7 +537,7 @@ Options:
 
 ### vs dbt
 
-| Aspect | dbt | sqt |
+| Aspect | dbt | smelt |
 |--------|-----|-----|
 | Model definition | Jinja + SQL templates | Parsed SQL with extensions |
 | Ref resolution | Runtime template expansion | Static analysis |
@@ -549,7 +549,7 @@ Options:
 
 ### vs Malloy
 
-| Aspect | Malloy | sqt |
+| Aspect | Malloy | smelt |
 |--------|--------|-----|
 | Primary user | Analyst exploring data | Engineer building pipelines |
 | Execution | Query-time SQL generation | Planned materialization |
@@ -558,28 +558,28 @@ Options:
 | Incrementalization | Not in scope | Core feature |
 | State management | None | Via target engine |
 
-Malloy is a better query language for analysts. sqt is infrastructure for data engineers.
+Malloy is a better query language for analysts. smelt is infrastructure for data engineers.
 
 ### vs Substrait
 
-Substrait defines a cross-engine plan representation. sqt could potentially:
+Substrait defines a cross-engine plan representation. smelt could potentially:
 - Use Substrait as an IR layer
 - Emit Substrait plans for DataFusion backend
 - Benefit from Substrait's type system work
 
 ### vs Apache Calcite
 
-Calcite is a query optimizer framework. sqt differs:
-- Calcite optimizes single queries; sqt optimizes pipeline DAGs
-- Calcite focuses on join ordering; sqt focuses on materialization/incrementalization
-- sqt delegates low-level optimization to target engines
+Calcite is a query optimizer framework. smelt differs:
+- Calcite optimizes single queries; smelt optimizes pipeline DAGs
+- Calcite focuses on join ordering; smelt focuses on materialization/incrementalization
+- smelt delegates low-level optimization to target engines
 
 ---
 
 ## Implementation Phases
 
 ### Phase 1: Core Parser and Single Backend
-- SQL parser with `sqt.ref()` extension
+- SQL parser with `smelt.ref()` extension
 - Basic type checking
 - DuckDB backend
 - Simple model dependencies
@@ -599,7 +599,7 @@ Calcite is a query optimizer framework. sqt differs:
 
 ### Phase 4: Metrics DSL
 - Metric definition syntax
-- `sqt.metric()` resolution
+- `smelt.metric()` resolution
 - Temporal semantics metadata
 - Metric composition
 
@@ -638,16 +638,16 @@ Calcite is a query optimizer framework. sqt differs:
 ## Appendix: SQL Extension Grammar (Sketch)
 
 ```ebnf
-sqt_ref ::= 'sqt.ref' '(' string_literal (',' ref_param)* ')'
+sqt_ref ::= 'smelt.ref' '(' string_literal (',' ref_param)* ')'
 ref_param ::= identifier '=>' expr
 
-sqt_metric ::= 'sqt.metric' '(' string_literal (',' metric_param)* ')'
+sqt_metric ::= 'smelt.metric' '(' string_literal (',' metric_param)* ')'
 metric_param ::= identifier '=>' expr
 
--- sqt functions can appear in:
---   FROM clause (sqt.ref)
---   SELECT expressions (sqt.metric)
---   WHERE/HAVING (sqt.metric for filtering)
+-- smelt functions can appear in:
+--   FROM clause (smelt.ref)
+--   SELECT expressions (smelt.metric)
+--   WHERE/HAVING (smelt.metric for filtering)
 ```
 
 ---
@@ -671,8 +671,8 @@ metric revenue:
 SELECT 
   order_date,
   customer_id,
-  sqt.metric('revenue') as daily_revenue
-FROM sqt.ref('orders', filter => order_date >= current_date - 90)
+  smelt.metric('revenue') as daily_revenue
+FROM smelt.ref('orders', filter => order_date >= current_date - 90)
 GROUP BY 1, 2
 ```
 
@@ -691,7 +691,7 @@ targets:
 
 **Deploy:**
 ```bash
-sqt deploy --model daily_revenue --target prod
+smelt deploy --model daily_revenue --target prod
 # Framework:
 #   1. Parses model, resolves metric
 #   2. Checks Spark supports all requirements

@@ -1,6 +1,6 @@
-# Testing the sqt VSCode Extension
+# Testing the smelt VSCode Extension
 
-This guide walks through testing the sqt VSCode extension with the test-workspace.
+This guide walks through testing the smelt VSCode extension with the test-workspace.
 
 ## Test Environment
 
@@ -207,7 +207,7 @@ Open the test workspace directly (requires extension to be installed).
 
 **LSP server not starting:**
 - ✓ Cargo must be in PATH
-- ✓ Run `cargo build -p sqt-lsp` to verify it compiles
+- ✓ Run `cargo build -p smelt-lsp` to verify it compiles
 - ✓ Check Output panel for server startup errors
 
 **Diagnostics not showing:**
@@ -256,6 +256,6 @@ Expected performance on test-workspace (4 models):
 
 For better performance, build LSP server in release mode:
 ```bash
-cargo build --release -p sqt-lsp
-# Then set sqt.serverPath to: target/release/sqt-lsp
+cargo build --release -p smelt-lsp
+# Then set sqt.serverPath to: target/release/smelt-lsp
 ```

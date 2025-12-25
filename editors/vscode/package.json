@@ -1,12 +1,12 @@
 {
-  "name": "sqt",
-  "displayName": "sqt - Semantic Query Tool",
-  "description": "Language support for sqt data pipeline models",
+  "name": "smelt",
+  "displayName": "smelt - Modern data transformation framework",
+  "description": "Language support for smelt data pipeline models",
   "version": "0.1.0",
-  "publisher": "sqt",
+  "publisher": "smelt",
   "repository": {
     "type": "git",
-    "url": "https://github.com/andrewbrowne/sqt"
+    "url": "https://github.com/adbrowne/smelt-sql"
   },
   "license": "MIT",
   "engines": {
@@ -29,10 +29,10 @@
   "contributes": {
     "languages": [
       {
-        "id": "sqt",
+        "id": "smelt",
         "aliases": [
-          "sqt",
-          "SQT"
+          "smelt",
+          "Smelt"
         ],
         "extensions": [
           ".sql"
@@ -42,16 +42,16 @@
     ],
     "grammars": [
       {
-        "language": "sqt",
-        "scopeName": "source.sql.sqt",
-        "path": "./syntaxes/sqt.tmLanguage.json"
+        "language": "smelt",
+        "scopeName": "source.sql.smelt",
+        "path": "./syntaxes/smelt.tmLanguage.json"
       }
     ],
     "configuration": {
       "type": "object",
-      "title": "sqt",
+      "title": "smelt",
       "properties": {
-        "sqt.trace.server": {
+        "smelt.trace.server": {
           "type": "string",
           "enum": [
             "off",
@@ -59,12 +59,12 @@
             "verbose"
           ],
           "default": "off",
-          "description": "Traces the communication between VS Code and the sqt language server."
+          "description": "Traces the communication between VS Code and the smelt language server."
         },
-        "sqt.serverPath": {
+        "smelt.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the sqt-lsp server binary. If empty, will use 'cargo run -p sqt-lsp'."
+          "description": "Path to the smelt-lsp server binary. If empty, will use 'cargo run -p smelt-lsp'."
         }
       }
     }

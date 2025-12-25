@@ -1,6 +1,6 @@
-# sqt Development Roadmap
+# smelt Development Roadmap
 
-This document tracks the implementation status of the sqt parser and LSP, aligned with the spec in [README.md](README.md).
+This document tracks the implementation status of the smelt parser and LSP, aligned with the spec in [README.md](README.md).
 
 ## Current Status
 
@@ -8,37 +8,37 @@ This document tracks the implementation status of the sqt parser and LSP, aligne
 
 ```sql
 -- ✅ Supported syntax (parser & LSP)
-SELECT * FROM sqt.ref('model_name')
-SELECT * FROM sqt.ref('events', filter => date > '2024-01-01')
-SELECT * FROM sqt.ref('orders', filter => status = 'active', limit => 100)
+SELECT * FROM smelt.ref('model_name')
+SELECT * FROM smelt.ref('events', filter => date > '2024-01-01')
+SELECT * FROM smelt.ref('orders', filter => status = 'active', limit => 100)
 ```
 
 ```bash
 # ✅ Supported CLI commands
-sqt run                           # Execute all models
-sqt run --show-results            # Preview query results
-sqt run --verbose                 # Show compiled SQL
-sqt run --dry-run                 # Validate without executing
+smelt run                           # Execute all models
+smelt run --show-results            # Preview query results
+smelt run --verbose                 # Show compiled SQL
+smelt run --dry-run                 # Validate without executing
 ```
 
 ---
 
-## ✅ Phase 1: Basic sqt.ref() Support (COMPLETED)
+## ✅ Phase 1: Basic smelt.ref() Support (COMPLETED)
 
 **Completed**: December 20, 2025
 
 ### What Was Implemented
 
-- Parser recognizes `sqt.ref('model')` pattern in FROM and expressions
+- Parser recognizes `smelt.ref('model')` pattern in FROM and expressions
 - AST extracts namespace and function name separately
-- RefCall strictly validates namespace is "sqt"
-- sqt-db and LSP work automatically through AST
-- Test workspace updated to `sqt.ref()` syntax
+- RefCall strictly validates namespace is "smelt"
+- smelt-db and LSP work automatically through AST
+- Test workspace updated to `smelt.ref()` syntax
 
 ### Key Changes
 
-- **Parser** (`crates/sqt-parser/src/parser.rs`): Handle `IDENT.IDENT()` pattern
-- **AST** (`crates/sqt-parser/src/ast.rs`): Add `FunctionCall::namespace()` method
+- **Parser** (`crates/smelt-parser/src/parser.rs`): Handle `IDENT.IDENT()` pattern
+- **AST** (`crates/smelt-parser/src/ast.rs`): Add `FunctionCall::namespace()` method
 - **RefCall**: Validate `sqt.` namespace prefix
 - **Test workspace**: All models use new syntax
 
@@ -59,10 +59,10 @@ sqt run --dry-run                 # Validate without executing
 
 ### Key Changes
 
-- **Lexer** (`crates/sqt-parser/src/lexer.rs`): Add `=>` token
-- **SyntaxKind** (`crates/sqt-parser/src/syntax_kind.rs`): Add ARROW and NAMED_PARAM
-- **Parser** (`crates/sqt-parser/src/parser.rs`): Parse named arguments
-- **AST** (`crates/sqt-parser/src/ast.rs`): Add NamedParam type
+- **Lexer** (`crates/smelt-parser/src/lexer.rs`): Add `=>` token
+- **SyntaxKind** (`crates/smelt-parser/src/syntax_kind.rs`): Add ARROW and NAMED_PARAM
+- **Parser** (`crates/smelt-parser/src/parser.rs`): Parse named arguments
+- **AST** (`crates/smelt-parser/src/ast.rs`): Add NamedParam type
 - **Test workspace**: Example with `filter =>` parameter
 
 ---
@@ -73,12 +73,12 @@ sqt run --dry-run                 # Validate without executing
 
 ### What Was Implemented
 
-- New `sqt-cli` crate with `sqt run` command
+- New `smelt-cli` crate with `sqt run` command
 - DuckDB-based model execution with file-based database persistence
-- YAML configuration (`sqt.yml` and `sources.yml`)
+- YAML configuration (`smelt.yml` and `sources.yml`)
 - Model discovery from `models/` directory
 - Dependency graph construction with topological sort
-- SQL compilation (replacing `sqt.ref()` with table references)
+- SQL compilation (replacing `smelt.ref()` with table references)
 - Table and view materialization strategies
 - Source table validation
 - Named parameter detection with clear error messages
@@ -95,7 +95,7 @@ sqt run --dry-run                 # Validate without executing
   - `--dry-run` - Validate without executing
 
 - **Configuration**: YAML-based project configuration
-  - `sqt.yml` - Project settings, targets, model materialization
+  - `smelt.yml` - Project settings, targets, model materialization
   - `sources.yml` - External source table definitions
 
 - **Execution Engine**:
@@ -115,24 +115,24 @@ sqt run --dry-run                 # Validate without executing
 ### Implementation Details
 
 **New Files**:
-- `crates/sqt-cli/Cargo.toml` - CLI crate definition
-- `crates/sqt-cli/src/main.rs` - Entry point and orchestration
-- `crates/sqt-cli/src/lib.rs` - Public API
-- `crates/sqt-cli/src/config.rs` - YAML configuration parsing
-- `crates/sqt-cli/src/discovery.rs` - Model file discovery
-- `crates/sqt-cli/src/graph.rs` - Dependency graph and topological sort
-- `crates/sqt-cli/src/compiler.rs` - SQL compilation (ref replacement)
-- `crates/sqt-cli/src/executor.rs` - DuckDB execution engine
-- `crates/sqt-cli/src/errors.rs` - Custom error types
+- `crates/smelt-cli/Cargo.toml` - CLI crate definition
+- `crates/smelt-cli/src/main.rs` - Entry point and orchestration
+- `crates/smelt-cli/src/lib.rs` - Public API
+- `crates/smelt-cli/src/config.rs` - YAML configuration parsing
+- `crates/smelt-cli/src/discovery.rs` - Model file discovery
+- `crates/smelt-cli/src/graph.rs` - Dependency graph and topological sort
+- `crates/smelt-cli/src/compiler.rs` - SQL compilation (ref replacement)
+- `crates/smelt-cli/src/executor.rs` - DuckDB execution engine
+- `crates/smelt-cli/src/errors.rs` - Custom error types
 
 **Test Configuration**:
-- `test-workspace/sqt.yml` - Example project configuration
+- `test-workspace/smelt.yml` - Example project configuration
 - `test-workspace/sources.yml` - Source table definitions
 - `test-workspace/setup_sources.sql` - Sample data generation
 
 ### Limitations (By Design)
 
-- Named parameters in `sqt.ref()` are detected but not yet compiled
+- Named parameters in `smelt.ref()` are detected but not yet compiled
   - Gives clear error: "named parameters which are not yet supported"
   - Can be implemented in future phase
 - No incremental materialization (always full refresh)
@@ -150,7 +150,7 @@ All executed in ~8ms with correct dependency resolution.
 
 ---
 
-## ⏸️ Phase 4: sqt.metric() Support (DEFERRED)
+## ⏸️ Phase 4: smelt.metric() Support (DEFERRED)
 
 **Status**: Deferred until metrics DSL design is finalized
 
@@ -167,7 +167,7 @@ Requires architectural decisions about:
 Can follow similar pattern to RefCall implementation:
 1. Add `MetricCall` AST type
 2. Add `File::metrics()` iterator
-3. Add `metric_refs()` query to sqt-db
+3. Add `metric_refs()` query to smelt-db
 4. Add LSP diagnostics for undefined metrics
 
 ---
@@ -179,7 +179,7 @@ Can follow similar pattern to RefCall implementation:
 **Value**: Make named parameters functional in CLI execution
 
 **Work**:
-1. Implement `filter =>` parameter compilation in `sqt-cli/src/compiler.rs`:
+1. Implement `filter =>` parameter compilation in `smelt-cli/src/compiler.rs`:
    - Parse filter expression from named parameter
    - Inject as WHERE clause in compiled SQL
    - Combine with existing WHERE clauses using AND
@@ -189,9 +189,9 @@ Can follow similar pattern to RefCall implementation:
 
 **Effort**: Medium (requires SQL AST manipulation)
 
-**Files**: `crates/sqt-cli/src/compiler.rs`, `crates/sqt-lsp/src/main.rs`
+**Files**: `crates/smelt-cli/src/compiler.rs`, `crates/smelt-lsp/src/main.rs`
 
-**Value**: Unlocks the full power of `sqt.ref()` parameters for filtering, partitioning, etc.
+**Value**: Unlocks the full power of `smelt.ref()` parameters for filtering, partitioning, etc.
 
 ---
 
@@ -207,7 +207,7 @@ Can follow similar pattern to RefCall implementation:
 
 **Effort**: Medium-High (requires state management)
 
-**Files**: `crates/sqt-cli/src/executor.rs`, new state tracking module
+**Files**: `crates/smelt-cli/src/executor.rs`, new state tracking module
 
 ---
 
@@ -216,14 +216,14 @@ Can follow similar pattern to RefCall implementation:
 **Value**: Enable smarter LSP features (autocomplete, validation)
 
 **Work**:
-1. Track column schemas in sqt-db
+1. Track column schemas in smelt-db
 2. Infer output columns from SELECT statements
 3. Validate column references in expressions
 4. Add LSP autocomplete for column names
 
 **Effort**: Medium (requires SQL analysis logic)
 
-**Files**: `crates/sqt-db/src/lib.rs`, `crates/sqt-lsp/src/main.rs`
+**Files**: `crates/smelt-db/src/lib.rs`, `crates/smelt-lsp/src/main.rs`
 
 ---
 
@@ -239,7 +239,7 @@ Can follow similar pattern to RefCall implementation:
 
 **Effort**: Low-Medium (infrastructure setup)
 
-**Files**: New test files in `crates/sqt-parser/tests/`, `crates/sqt-lsp/tests/`
+**Files**: New test files in `crates/smelt-parser/tests/`, `crates/smelt-lsp/tests/`
 
 ---
 
@@ -248,7 +248,7 @@ Can follow similar pattern to RefCall implementation:
 **Value**: Better developer experience
 
 **Work**:
-1. Add syntax highlighting for `sqt.ref()` and parameters
+1. Add syntax highlighting for `smelt.ref()` and parameters
 2. Add snippets for common patterns
 3. Improve error message formatting
 4. Add "Find All References" support

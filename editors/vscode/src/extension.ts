@@ -10,24 +10,24 @@ import {
 let client: LanguageClient;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('sqt extension activating...');
+    console.log('smelt extension activating...');
 
     // Get workspace folder
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
-        vscode.window.showErrorMessage('sqt: No workspace folder found');
+        vscode.window.showErrorMessage('smelt: No workspace folder found');
         return;
     }
 
-    // Find the sqt project root (where Cargo.toml is)
-    const sqtRoot = findSqtRoot(workspaceFolder.uri.fsPath);
-    if (!sqtRoot) {
-        vscode.window.showErrorMessage('sqt: Could not find sqt project root (Cargo.toml)');
+    // Find the smelt project root (where Cargo.toml is)
+    const smeltRoot = findSmeltRoot(workspaceFolder.uri.fsPath);
+    if (!smeltRoot) {
+        vscode.window.showErrorMessage('smelt: Could not find smelt project root (Cargo.toml)');
         return;
     }
 
     // Get server path from configuration or use default
-    const config = vscode.workspace.getConfiguration('sqt');
+    const config = vscode.workspace.getConfiguration('smelt');
     const serverPath = config.get<string>('serverPath');
 
     let serverCommand: Executable;
@@ -42,9 +42,9 @@ export function activate(context: vscode.ExtensionContext) {
         // Use cargo run
         serverCommand = {
             command: 'cargo',
-            args: ['run', '--manifest-path', path.join(sqtRoot, 'Cargo.toml'), '-p', 'sqt-lsp'],
+            args: ['run', '--manifest-path', path.join(smeltRoot, 'Cargo.toml'), '-p', 'smelt-lsp'],
             options: {
-                cwd: sqtRoot
+                cwd: smeltRoot
             }
         };
     }
@@ -60,24 +60,24 @@ export function activate(context: vscode.ExtensionContext) {
             fileEvents: vscode.workspace.createFileSystemWatcher('**/models/**/*.sql')
         },
         workspaceFolder: workspaceFolder,
-        outputChannelName: 'sqt Language Server'
+        outputChannelName: 'smelt Language Server'
     };
 
     // Create the language client
     client = new LanguageClient(
-        'sqt',
-        'sqt Language Server',
+        'smelt',
+        'smelt Language Server',
         serverOptions,
         clientOptions
     );
 
     // Start the client (this will also launch the server)
     client.start().then(() => {
-        console.log('sqt language server started successfully');
-        vscode.window.showInformationMessage('sqt language server is running');
+        console.log('smelt language server started successfully');
+        vscode.window.showInformationMessage('smelt language server is running');
     }).catch(err => {
-        console.error('Failed to start sqt language server:', err);
-        vscode.window.showErrorMessage(`sqt: Failed to start language server: ${err.message}`);
+        console.error('Failed to start smelt language server:', err);
+        vscode.window.showErrorMessage(`smelt: Failed to start language server: ${err.message}`);
     });
 }
 
@@ -89,9 +89,9 @@ export function deactivate(): Thenable<void> | undefined {
 }
 
 /**
- * Find the sqt project root by looking for Cargo.toml
+ * Find the smelt project root by looking for Cargo.toml
  */
-function findSqtRoot(startPath: string): string | null {
+function findSmeltRoot(startPath: string): string | null {
     let currentPath = startPath;
     const root = path.parse(currentPath).root;
 
@@ -101,15 +101,15 @@ function findSqtRoot(startPath: string): string | null {
             if (require('fs').existsSync(cargoPath)) {
                 const content = require('fs').readFileSync(cargoPath, 'utf-8');
 
-                // Check if this is the sqt project by looking for:
-                // 1. Direct mention of sqt-lsp in Cargo.toml, OR
-                // 2. Workspace with crates/sqt-lsp directory
-                if (content.includes('sqt-lsp')) {
+                // Check if this is the smelt project by looking for:
+                // 1. Direct mention of smelt-lsp in Cargo.toml, OR
+                // 2. Workspace with crates/smelt-lsp directory
+                if (content.includes('smelt-lsp')) {
                     return currentPath;
                 }
 
                 if (content.includes('[workspace]')) {
-                    const lspPath = path.join(currentPath, 'crates', 'sqt-lsp');
+                    const lspPath = path.join(currentPath, 'crates', 'smelt-lsp');
                     if (require('fs').existsSync(lspPath)) {
                         return currentPath;
                     }

@@ -16,13 +16,13 @@
                       │ LSP Protocol (JSON-RPC)
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
-│                   sqt-lsp (LSP Server)                       │
+│                   smelt-lsp (LSP Server)                       │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │         tower-lsp (Protocol Implementation)          │   │
 │  └────────────────────┬─────────────────────────────────┘   │
 │                       │                                      │
 │  ┌────────────────────▼─────────────────────────────────┐   │
-│  │             Salsa Database (sqt-db)                  │   │
+│  │             Salsa Database (smelt-db)                  │   │
 │  │  • Manages query cache                               │   │
 │  │  • Tracks dependencies between queries               │   │
 │  │  • Invalidates on input changes                      │   │

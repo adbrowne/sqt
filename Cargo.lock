@@ -2969,6 +2969,66 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
+name = "smelt-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow 54.2.1",
+ "clap",
+ "duckdb",
+ "rowan",
+ "serde",
+ "serde_yaml",
+ "smelt-db",
+ "smelt-parser",
+ "tempfile",
+ "thiserror",
+ "walkdir",
+]
+
+[[package]]
+name = "smelt-db"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rowan",
+ "salsa",
+ "smelt-parser",
+]
+
+[[package]]
+name = "smelt-examples"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow 54.2.1",
+ "datafusion",
+ "duckdb",
+ "tokio",
+]
+
+[[package]]
+name = "smelt-lsp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "lsp-types",
+ "serde",
+ "serde_json",
+ "smelt-db",
+ "smelt-parser",
+ "tokio",
+ "tower-lsp",
+]
+
+[[package]]
+name = "smelt-parser"
+version = "0.1.0"
+dependencies = [
+ "rowan",
+]
+
+[[package]]
 name = "snafu"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3024,66 +3084,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
-]
-
-[[package]]
-name = "sqt-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arrow 54.2.1",
- "clap",
- "duckdb",
- "rowan",
- "serde",
- "serde_yaml",
- "sqt-db",
- "sqt-parser",
- "tempfile",
- "thiserror",
- "walkdir",
-]
-
-[[package]]
-name = "sqt-db"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rowan",
- "salsa",
- "sqt-parser",
-]
-
-[[package]]
-name = "sqt-examples"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arrow 54.2.1",
- "datafusion",
- "duckdb",
- "tokio",
-]
-
-[[package]]
-name = "sqt-lsp"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "lsp-types",
- "serde",
- "serde_json",
- "sqt-db",
- "sqt-parser",
- "tokio",
- "tower-lsp",
-]
-
-[[package]]
-name = "sqt-parser"
-version = "0.1.0"
-dependencies = [
- "rowan",
 ]
 
 [[package]]

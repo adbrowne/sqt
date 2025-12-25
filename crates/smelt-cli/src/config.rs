@@ -1,0 +1,236 @@
+use crate::errors::CliError;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Materialization {
+    Table,
+    View,
+}
+
+impl<'de> Deserialize<'de> for Materialization {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.to_lowercase().as_str() {
+            "table" => Ok(Materialization::Table),
+            "view" => Ok(Materialization::View),
+            _ => Err(serde::de::Error::custom(format!(
+                "Invalid materialization type: {}. Must be 'table' or 'view'",
+                s
+            ))),
+        }
+    }
+}
+
+impl Serialize for Materialization {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Materialization::Table => serializer.serialize_str("table"),
+            Materialization::View => serializer.serialize_str("view"),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Config {
+    pub name: String,
+    pub version: u32,
+    #[serde(default = "default_model_paths")]
+    pub model_paths: Vec<String>,
+    pub targets: HashMap<String, Target>,
+    #[serde(default = "default_materialization")]
+    pub default_materialization: Materialization,
+    #[serde(default)]
+    pub models: HashMap<String, ModelConfig>,
+}
+
+fn default_model_paths() -> Vec<String> {
+    vec!["models".to_string()]
+}
+
+fn default_materialization() -> Materialization {
+    Materialization::View
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Target {
+    #[serde(rename = "type")]
+    pub target_type: String,
+    pub database: String,
+    pub schema: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ModelConfig {
+    pub materialization: Materialization,
+}
+
+impl Config {
+    pub fn load(project_dir: &Path) -> Result<Self> {
+        let config_path = project_dir.join("smelt.yml");
+        let content = std::fs::read_to_string(&config_path).map_err(|e| {
+            CliError::ConfigLoadError {
+                path: config_path.clone(),
+                source: e.into(),
+            }
+        })?;
+
+        serde_yaml::from_str(&content).map_err(|e| {
+            CliError::ConfigLoadError {
+                path: config_path,
+                source: e.into(),
+            }
+            .into()
+        })
+    }
+
+    pub fn get_materialization(&self, model_name: &str) -> Materialization {
+        self.models
+            .get(model_name)
+            .map(|m| m.materialization.clone())
+            .unwrap_or_else(|| self.default_materialization.clone())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SourceConfig {
+    pub version: u32,
+    pub sources: HashMap<String, SourceSchema>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SourceSchema {
+    pub tables: HashMap<String, SourceTable>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SourceTable {
+    #[serde(default)]
+    pub description: String,
+    pub columns: Vec<SourceColumn>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SourceColumn {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub column_type: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+impl SourceConfig {
+    pub fn load(project_dir: &Path) -> Result<Self> {
+        let sources_path = project_dir.join("sources.yml");
+        let content = std::fs::read_to_string(&sources_path).map_err(|e| {
+            CliError::ConfigLoadError {
+                path: sources_path.clone(),
+                source: e.into(),
+            }
+        })?;
+
+        serde_yaml::from_str(&content).map_err(|e| {
+            CliError::ConfigLoadError {
+                path: sources_path,
+                source: e.into(),
+            }
+            .into()
+        })
+    }
+
+    /// Get full source name (schema.table format)
+    pub fn get_source_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        for (schema_name, schema) in &self.sources {
+            for table_name in schema.tables.keys() {
+                names.push(format!("{}.{}", schema_name, table_name));
+            }
+        }
+        names
+    }
+}
+
+/// Find the smelt project root by looking for smelt.yml or models/ directory
+pub fn find_project_root(start_dir: &Path) -> Result<PathBuf> {
+    let mut current = start_dir.to_path_buf();
+
+    // Walk up max 5 levels
+    for _ in 0..5 {
+        // Check for smelt.yml
+        if current.join("smelt.yml").exists() {
+            return Ok(current);
+        }
+
+        // Check for models/ directory
+        if current.join("models").is_dir() {
+            return Ok(current);
+        }
+
+        // Go up one level
+        if let Some(parent) = current.parent() {
+            current = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+
+    Err(CliError::ProjectRootNotFound.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_materialization_deserialization() {
+        let yaml = r#"
+name: test_project
+version: 1
+targets:
+  dev:
+    type: duckdb
+    database: test.duckdb
+    schema: main
+models:
+  model1:
+    materialization: table
+  model2:
+    materialization: view
+"#;
+
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.name, "test_project");
+        assert_eq!(
+            config.models.get("model1").unwrap().materialization,
+            Materialization::Table
+        );
+        assert_eq!(
+            config.models.get("model2").unwrap().materialization,
+            Materialization::View
+        );
+    }
+
+    #[test]
+    fn test_default_materialization() {
+        let yaml = r#"
+name: test_project
+version: 1
+targets:
+  dev:
+    type: duckdb
+    database: test.duckdb
+    schema: main
+"#;
+
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.default_materialization, Materialization::View);
+    }
+}

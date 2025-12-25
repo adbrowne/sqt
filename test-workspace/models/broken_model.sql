@@ -1,3 +1,3 @@
 -- This model has an undefined reference - should show diagnostic
 SELECT *
-FROM sqt.ref('nonexistent_model')
+FROM smelt.ref('nonexistent_model')

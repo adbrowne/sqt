@@ -1,10 +1,10 @@
-# sqt VSCode Extension
+# smelt VSCode Extension
 
-Language support for sqt (Semantic Query Tool) data pipeline models.
+Language support for smelt (Modern data transformation framework) data pipeline models.
 
 ## Features
 
-- **Syntax Highlighting**: Highlights SQL keywords and sqt template syntax (`{{ ref() }}`, `{{ config() }}`)
+- **Syntax Highlighting**: Highlights SQL keywords and smelt template syntax (`{{ ref() }}`, `{{ config() }}`)
 - **Diagnostics**: Shows errors for undefined model references
 - **Go to Definition**: Ctrl+Click (Cmd+Click on Mac) on `{{ ref('model_name') }}` to jump to the model definition
 - **Incremental Updates**: Fast feedback powered by Salsa incremental compilation
@@ -44,13 +44,13 @@ Language support for sqt (Semantic Query Tool) data pipeline models.
 
 3. Press F5 to launch Extension Development Host
 
-4. Open a workspace containing sqt models
+4. Open a workspace containing smelt models
 
 ## Usage
 
 ### Project Structure
 
-Your sqt project should have this structure:
+Your smelt project should have this structure:
 
 ```
 my-project/
@@ -89,12 +89,12 @@ GROUP BY user_id
 
 Access settings via: Preferences → Settings → Extensions → sqt
 
-- **sqt.serverPath**: Path to pre-built `sqt-lsp` binary (optional)
-  - If not set, uses `cargo run -p sqt-lsp` (slower startup)
+- **sqt.serverPath**: Path to pre-built `smelt-lsp` binary (optional)
+  - If not set, uses `cargo run -p smelt-lsp` (slower startup)
   - For better performance, build once and set path:
     ```bash
-    cargo build --release -p sqt-lsp
-    # Then set path to: target/release/sqt-lsp
+    cargo build --release -p smelt-lsp
+    # Then set path to: target/release/smelt-lsp
     ```
 
 - **sqt.trace.server**: Enable server communication tracing for debugging

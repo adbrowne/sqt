@@ -13,9 +13,9 @@ The minimal LSP provides:
 ```
 Editor (VSCode, etc.)
     ↓ LSP Protocol
-sqt-lsp Server
+smelt-lsp Server
     ↓ Salsa Queries
-sqt-db (Database)
+smelt-db (Database)
     ↓ Parse & Analyze
 Model Files (.sql)
 ```
@@ -48,12 +48,12 @@ When you edit a file:
 
 ### Build
 ```bash
-cargo build -p sqt-lsp
+cargo build -p smelt-lsp
 ```
 
 ### Run
 ```bash
-cargo run -p sqt-lsp
+cargo run -p smelt-lsp
 ```
 
 The server communicates via stdin/stdout using the LSP protocol.
@@ -64,7 +64,7 @@ The server communicates via stdin/stdout using the LSP protocol.
 
 1. Open `test-workspace/` in VSCode
 2. Install a generic LSP client extension
-3. Configure it to run: `cargo run -p sqt-lsp`
+3. Configure it to run: `cargo run -p smelt-lsp`
 4. Open the SQL files and observe:
    - `broken_model.sql` shows error diagnostic
    - Ctrl+Click on `ref('raw_events')` jumps to definition
@@ -108,7 +108,7 @@ FROM {{ ref('nonexistent') }}  -- ← shows diagnostic error
 
 ## Implementation Details
 
-### Database (sqt-db/src/lib.rs)
+### Database (smelt-db/src/lib.rs)
 
 ```rust
 #[salsa::query_group(SyntaxStorage)]
@@ -124,7 +124,7 @@ Salsa automatically:
 - Tracks dependencies between queries
 - Invalidates and recomputes only what changed
 
-### LSP Server (sqt-lsp/src/main.rs)
+### LSP Server (smelt-lsp/src/main.rs)
 
 ```rust
 async fn did_change(&self, params: DidChangeTextDocumentParams) {

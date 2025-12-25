@@ -1,4 +1,4 @@
-# Test Workspace for sqt LSP
+# Test Workspace for smelt LSP
 
 This directory contains test SQL models to demonstrate the LSP features.
 
@@ -12,7 +12,7 @@ This directory contains test SQL models to demonstrate the LSP features.
 ## Testing the LSP
 
 1. Open this workspace in an editor with LSP support
-2. Configure the editor to use the sqt LSP server: `cargo run -p sqt-lsp`
+2. Configure the editor to use the smelt LSP server: `cargo run -p smelt-lsp`
 3. Open one of the SQL files
 4. You should see:
    - Error diagnostic in broken_model.sql

@@ -38,15 +38,15 @@ fi
 CARGO_VERSION=$(cargo --version)
 echo "  ✅ $CARGO_VERSION"
 
-# Check 4: sqt-lsp builds
+# Check 4: smelt-lsp builds
 echo ""
-echo "✓ Checking sqt-lsp compiles..."
+echo "✓ Checking smelt-lsp compiles..."
 cd ..
-if ! cargo build -p sqt-lsp 2>&1 | grep -q "Finished"; then
-    echo "  ❌ ERROR: sqt-lsp failed to build"
+if ! cargo build -p smelt-lsp 2>&1 | grep -q "Finished"; then
+    echo "  ❌ ERROR: smelt-lsp failed to build"
     exit 1
 fi
-echo "  ✅ sqt-lsp builds successfully"
+echo "  ✅ smelt-lsp builds successfully"
 
 # Check 5: VSCode extension structure
 echo ""

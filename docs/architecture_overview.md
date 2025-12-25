@@ -2,7 +2,7 @@
 
 ## The Big Picture
 
-sqt combines three powerful ideas:
+smelt combines three powerful ideas:
 
 1. **Logical/Physical Separation**: Users write WHAT to compute, optimizer decides HOW
 2. **Cross-Model Optimization**: Detect and optimize patterns across multiple models
@@ -182,7 +182,7 @@ FROM {{ ref('_session_summary') }}
 ### 8. Execution
 
 ```bash
-$ sqt run --target production
+$ smelt run --target production
 
 Compiling pipeline...
   ✓ Parsed 47 models (120ms)

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**sqt** - Semantic Query Tool
+**smelt** - Modern data transformation framework
 
 A next-generation data pipeline tool designed to improve upon dbt by:
 - Separating logical specification (what to compute) from physical execution (how to execute)
@@ -12,7 +12,7 @@ A next-generation data pipeline tool designed to improve upon dbt by:
 - Supporting multi-backend execution (DuckDB, Databricks, etc.)
 - Using a proper language instead of Jinja templates
 
-**Current Phase**: Parser and LSP implementation - Phases 1 & 2 complete (sqt.ref() with named parameters).
+**Current Phase**: Parser and LSP implementation - Phases 1 & 2 complete (smelt.ref() with named parameters).
 
 **Project Status**: Early-stage development - no backward compatibility constraints. The codebase is evolving rapidly and breaking changes are expected.
 
@@ -21,7 +21,7 @@ A next-generation data pipeline tool designed to improve upon dbt by:
 - **README.md**: Full language specification and design decisions
   - Two-layer DSL architecture (Metrics DSL + SQL models)
   - Type system design
-  - Extension syntax (`sqt.ref()`, `sqt.metric()` with `=>` parameters)
+  - Extension syntax (`smelt.ref()`, `smelt.metric()` with `=>` parameters)
   - Computation requirements (stateless, windowed, sessionized, etc.)
   - Backend capabilities and rewrite rules
   - Incrementalization and optimization strategy
@@ -62,7 +62,7 @@ cargo run --example example2_optimized   # Split large GROUP BY (optimized)
 cargo build  # bundled is default
 
 # Run the LSP server
-cargo run -p sqt-lsp
+cargo run -p smelt-lsp
 
 # Test with sample workspace
 # (Configure your editor to use the LSP server, then open test-workspace/)
@@ -89,7 +89,7 @@ npm run watch
 
 ### High-Level Design
 
-sqt is a **compiler and orchestrator**, not a query engine:
+smelt is a **compiler and orchestrator**, not a query engine:
 ```
 User DSL → Parser → Logical IR → Optimizer → Physical IR → SQL for Target Engines
 ```
@@ -102,22 +102,22 @@ User DSL → Parser → Logical IR → Optimizer → Physical IR → SQL for Tar
 
 The parser is separated into reusable layers:
 ```
-sqt-parser (pure parser)  →  sqt-db (Salsa queries)  →  sqt-lsp (LSP server)
-                          ↘  sqt-optimizer (future)
-                          ↘  sqt-cli (future)
+smelt-parser (pure parser)  →  smelt-db (Salsa queries)  →  smelt-lsp (LSP server)
+                          ↘  smelt-optimizer (future)
+                          ↘  smelt-cli (future)
 ```
 
-- **sqt-parser**: Standalone Rowan-based parser (no Salsa dependency)
+- **smelt-parser**: Standalone Rowan-based parser (no Salsa dependency)
   - Pure function: text → CST with error recovery
   - Reusable in any context (LSP, optimizer, CLI)
   - Fast one-shot parsing for non-incremental use cases
 
-- **sqt-db**: Salsa wrapper around sqt-parser
+- **smelt-db**: Salsa wrapper around smelt-parser
   - Incremental compilation for LSP responsiveness
   - Caches parse results and derived queries
   - Automatic invalidation when files change
 
-This separation allows the LSP to get incremental parsing via Salsa, while the optimizer and CLI can use fast one-shot parsing directly from sqt-parser.
+This separation allows the LSP to get incremental parsing via Salsa, while the optimizer and CLI can use fast one-shot parsing directly from smelt-parser.
 
 ### Key Dependencies
 
@@ -132,13 +132,13 @@ This separation allows the LSP to get incremental parsing via Salsa, while the o
 
 The project uses concrete examples to discover the right optimizer API:
 
-1. **Example 1** (`crates/sqt-examples/examples/`):
+1. **Example 1** (`crates/smelt-examples/examples/`):
    - **Naive version** (`example1_naive.rs`): Three models computing sessions independently
    - **Optimized version** (`example1_optimized.rs`): Shared session computation
    - **Goal**: Extract patterns for detecting common intermediate aggregations
    - **Type**: Transparent optimization (preserves exact results)
 
-2. **Example 2** (`crates/sqt-examples/examples/`):
+2. **Example 2** (`crates/smelt-examples/examples/`):
    - **Naive version** (`example2_naive.rs`): Large multi-dimensional GROUP BY with massive shuffle
    - **Optimized version** (`example2_optimized.rs`): Split into independent dimensional queries
    - **Goal**: Demonstrate when optimizations require user consent (lossy transformation)
@@ -146,27 +146,27 @@ The project uses concrete examples to discover the right optimizer API:
 
 ### Crate Structure
 
-- `sqt-parser`: Rowan-based error-recovery parser (standalone, reusable)
-  - Lexer: Tokenizes SQL + sqt extensions (`sqt.ref()`, `sqt.metric()`, `=>` operator)
+- `smelt-parser`: Rowan-based error-recovery parser (standalone, reusable)
+  - Lexer: Tokenizes SQL + smelt extensions (`smelt.ref()`, `smelt.metric()`, `=>` operator)
   - Parser: Recursive descent parser with error recovery at sync points
   - AST: Typed wrappers over Rowan CST for convenient traversal
   - Parses SQL structure: SELECT, FROM, WHERE, GROUP BY, expressions, functions
   - Named parameters: Handles `param => value` syntax in function calls
   - Position tracking: Accurate line/column information for diagnostics and goto-definition
-- `sqt-examples`: Concrete optimization examples used to drive API design
+- `smelt-examples`: Concrete optimization examples used to drive API design
   - `src/utils.rs`: Shared utilities for DuckDB execution and pretty printing
   - `examples/`: Runnable examples comparing naive vs optimized approaches
-- `sqt-db`: Salsa database with incremental queries (wraps sqt-parser for incremental compilation)
+- `smelt-db`: Salsa database with incremental queries (wraps smelt-parser for incremental compilation)
   - Input queries: `file_text()`, `all_files()`
   - Syntax queries: `parse_file()`, `parse_model()`, `model_refs()` (with positions)
   - Semantic queries: `resolve_ref()`, `file_diagnostics()` (with accurate positions)
-- `sqt-lsp`: Language Server Protocol implementation
+- `smelt-lsp`: Language Server Protocol implementation
   - Diagnostics for undefined refs and parse errors (with accurate positions)
-  - Go-to-definition for `sqt.ref()` using CST position tracking
+  - Go-to-definition for `smelt.ref()` using CST position tracking
   - Extracts named parameters from ref calls for future validation
   - Full Salsa integration for incremental updates
 - `editors/vscode`: VSCode extension
-  - Language client that connects to sqt-lsp
+  - Language client that connects to smelt-lsp
   - Syntax highlighting for SQL + templates
   - Auto-activation when models/ directory detected
   - See editors/vscode/README.md for installation
@@ -189,7 +189,7 @@ The project uses concrete examples to discover the right optimizer API:
 
 1. Review the spec in README.md for requirements
 2. Implement parser changes (lexer → syntax → parser → AST)
-3. Update sqt-db queries if needed (usually automatic via AST)
+3. Update smelt-db queries if needed (usually automatic via AST)
 4. Update LSP features if needed (diagnostics, goto-definition, etc.)
 5. Test with test-workspace models
 6. **Run `cargo clippy --all-targets` and fix all warnings**
