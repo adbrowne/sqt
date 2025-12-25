@@ -1,5 +1,4 @@
 /// Lexer for sqt SQL files with template expressions
-
 use crate::syntax_kind::SyntaxKind;
 use crate::SyntaxKind::*;
 
@@ -199,7 +198,7 @@ impl<'a> Lexer<'a> {
         }
 
         // Handle decimal point
-        if self.current_char() == '.' && self.peek_char().map_or(false, |c| c.is_ascii_digit()) {
+        if self.current_char() == '.' && self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
             self.advance(); // consume '.'
             while self.current_char().is_ascii_digit() {
                 self.advance();

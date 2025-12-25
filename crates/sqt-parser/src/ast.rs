@@ -1,6 +1,5 @@
 /// Typed AST wrappers over Rowan CST
-
-use crate::syntax_kind::{SyntaxNode, SyntaxToken};
+use crate::syntax_kind::SyntaxNode;
 use crate::SyntaxKind::*;
 use rowan::TextRange;
 
@@ -222,7 +221,7 @@ impl Expr {
         }
 
         // Check if this is a function call
-        if let Some(func) = self.as_function_call() {
+        if let Some(_func) = self.as_function_call() {
             // For function calls without alias, use the full function text
             return Some(self.text());
         }

@@ -12,7 +12,6 @@
 /// Result: Cartesian explosion in shuffle (millions × hundreds × tens × 365)
 ///
 /// This example demonstrates the problem and sets up for the optimization.
-
 use anyhow::Result;
 use duckdb::Connection;
 use sqt_examples::utils::{create_duckdb_connection, execute_and_print};

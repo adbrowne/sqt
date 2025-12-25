@@ -18,7 +18,6 @@
 ///
 /// This is similar to computing a CUBE or ROLLUP, but more efficient because
 /// we only compute the dimensions we actually need (not all combinations).
-
 use anyhow::Result;
 use duckdb::Connection;
 use sqt_examples::utils::{create_duckdb_connection, execute_and_print};

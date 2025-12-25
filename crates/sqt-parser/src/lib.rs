@@ -9,7 +9,6 @@
 /// - Position tracking for diagnostics and IDE features
 ///
 /// This crate is standalone and can be used independently of the LSP or Salsa.
-
 pub mod syntax_kind;
 pub mod lexer;
 pub mod parser;

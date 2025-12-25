@@ -1,7 +1,7 @@
 /// Token and node types for the sqt language
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
+#[allow(non_camel_case_types)]
 pub enum SyntaxKind {
     // Keywords
     SELECT_KW,

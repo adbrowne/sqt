@@ -2,7 +2,6 @@
 ///
 /// This version computes the session_summary CTE ONCE and reuses it for all three models.
 /// This demonstrates what an optimizer should automatically detect and generate.
-
 use anyhow::Result;
 use duckdb::Connection;
 use sqt_examples::utils::{create_duckdb_connection, execute_and_print};

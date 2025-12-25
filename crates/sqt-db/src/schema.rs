@@ -4,7 +4,6 @@
 /// - Tracking column names and lineage
 /// - LSP features (hover, autocomplete)
 /// - Future refactoring API
-
 use rowan::TextRange;
 
 /// Represents a column in a model's output schema

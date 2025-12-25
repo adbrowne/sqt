@@ -1,5 +1,4 @@
 /// Parser implementation with error recovery
-
 use crate::lexer::{tokenize, Token};
 use crate::syntax_kind::{SqtLanguage, SyntaxKind};
 use crate::SyntaxKind::*;
@@ -408,7 +407,7 @@ impl<'a> Parser<'a> {
 
         if self.at(LPAREN) {
             // Parenthesized expression or function call
-            let checkpoint = self.pos;
+            let _checkpoint = self.pos;
             self.advance();
             self.skip_trivia();
 
@@ -444,9 +443,7 @@ impl<'a> Parser<'a> {
                 // else: just a qualified name (table.column), no extra node needed
             }
             // else: just an identifier, no extra node needed
-        } else if self.current().is_literal() {
-            self.advance();
-        } else if self.at(STAR) {
+        } else if self.current().is_literal() || self.at(STAR) {
             self.advance();
         } else {
             self.error(format!("Expected expression, found {:?}", self.current()));

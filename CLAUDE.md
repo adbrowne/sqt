@@ -46,6 +46,12 @@ A next-generation data pipeline tool designed to improve upon dbt by:
 # Build the entire workspace
 cargo build
 
+# Run clippy (linter) - must pass with no warnings
+cargo clippy --all-targets
+
+# Run tests
+cargo test
+
 # Run examples
 cargo run --example example1_naive       # Common intermediate aggregation (naive)
 cargo run --example example1_optimized   # Common intermediate aggregation (optimized)
@@ -186,8 +192,10 @@ The project uses concrete examples to discover the right optimizer API:
 3. Update sqt-db queries if needed (usually automatic via AST)
 4. Update LSP features if needed (diagnostics, goto-definition, etc.)
 5. Test with test-workspace models
-6. Update ROADMAP.md with completion status and commit hash
-7. Commit with descriptive message
+6. **Run `cargo clippy --all-targets` and fix all warnings**
+7. Run `cargo build` and `cargo test` to ensure everything compiles and passes
+8. Update ROADMAP.md with completion status and commit hash
+9. Commit with descriptive message
 
 ### For Optimizer Features (Future)
 

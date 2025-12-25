@@ -1,12 +1,3 @@
-/// sqt Language Server
-///
-/// Provides LSP features for sqt model files:
-/// - Diagnostics (errors, warnings)
-/// - Go-to-definition for ref() calls
-/// - Completions (future)
-/// - Hover information (future)
-
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tower_lsp::jsonrpc::Result;
@@ -380,9 +371,7 @@ impl LanguageServer for Backend {
             CompletionContext::InsideRef => {
                 // Complete model names
                 let models = db.all_models();
-                models
-                    .iter()
-                    .map(|(_, model)| CompletionItem {
+                models.values().map(|model| CompletionItem {
                         label: model.name.clone(),
                         kind: Some(CompletionItemKind::MODULE),
                         detail: Some(format!("Model: {}", model.name)),

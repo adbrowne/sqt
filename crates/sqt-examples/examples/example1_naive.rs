@@ -8,7 +8,6 @@
 /// Naive approach: Each model computes sessions independently (3x redundant work)
 ///
 /// A "session" is a group of events from the same user within a 30-minute window.
-
 use anyhow::Result;
 use duckdb::Connection;
 use sqt_examples::utils::{create_duckdb_connection, execute_and_print};

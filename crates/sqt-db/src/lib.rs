@@ -2,7 +2,6 @@
 ///
 /// This module defines the Salsa queries that power the LSP and optimizer.
 /// Salsa automatically handles incremental recomputation when inputs change.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -93,9 +92,7 @@ fn parse_model(db: &dyn Syntax, path: PathBuf) -> Option<Arc<Model>> {
     let file = AstFile::cast(syntax)?;
 
     // Check if file has a SELECT statement
-    if file.select_stmt().is_none() {
-        return None;
-    }
+    file.select_stmt()?;
 
     Some(Arc::new(Model {
         name: model_name,
@@ -237,7 +234,7 @@ fn model_schema(db: &dyn Schema, path: PathBuf) -> Arc<ModelSchema> {
     // Parse the model
     let parse = db.parse_file(path.clone());
     let syntax = parse.syntax();
-    let text = db.file_text(path.clone());
+    let _text = db.file_text(path.clone());
 
     let file = match AstFile::cast(syntax) {
         Some(f) => f,
@@ -261,7 +258,7 @@ fn model_schema(db: &dyn Schema, path: PathBuf) -> Arc<ModelSchema> {
             .filter_map(|table_ref| {
                 table_ref
                     .function_call()
-                    .and_then(|f| RefCall::from_function_call(f))
+                    .and_then(RefCall::from_function_call)
                     .and_then(|r| r.model_name())
             })
             .collect()
