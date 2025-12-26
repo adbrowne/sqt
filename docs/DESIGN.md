@@ -573,197 +573,295 @@ Calcite is a query optimizer framework. smelt differs:
 
 ## Incremental Table Builds
 
-This section describes smelt's approach to incremental materialization, inspired by dbt's microbatch but leveraging smelt's semantic understanding to do more.
+### Philosophy: Build with smelt, Not Bake into smelt
 
-### Core Advantage: Multi-Statement Generation
+**Key Insight**: Incremental table builds should be **implementable using smelt's DSL**, not baked into the framework as special logic. If smelt's framework is sufficiently powerful and flexible, users should be able to express incremental patterns themselves.
 
-**This is smelt's key differentiator.** Because smelt parses and understands SQL semantics (not just templates), one logical model definition can generate multiple physical SQL statements:
+This approach:
+1. **Tests the framework's expressiveness** - If users can build complex patterns like incrementalization, the framework is powerful
+2. **Enables innovation** - Users can create custom materialization strategies beyond what we imagined
+3. **Reduces framework complexity** - Less special-casing, more general primitives
+4. **Improves transparency** - Users see exactly how incrementalization works, can modify it
 
-```sql
--- Logical model (what the user writes)
-SELECT order_date, customer_id, SUM(amount) as total
-FROM smelt.ref('orders')
-GROUP BY order_date, customer_id
-```
+### What This Requires from smelt
 
-```sql
--- Generated physical statements (DELETE + INSERT strategy)
--- Statement 1: Delete affected time range
-DELETE FROM daily_revenue
-WHERE order_date >= '2024-01-15'
-  AND order_date < '2024-01-18';
+For users to build incremental materialization themselves, smelt needs these capabilities:
 
--- Statement 2: Insert fresh data
-INSERT INTO daily_revenue
-SELECT order_date, customer_id, SUM(amount) as total
-FROM orders
-WHERE order_date >= '2024-01-15'
-  AND order_date < '2024-01-18'
-GROUP BY order_date, customer_id;
-```
+#### 1. Multi-Statement Models
 
-dbt cannot do this because it treats SQL as opaque text. smelt can because it understands the query structure.
-
-### User-Facing Configuration
-
-Users declare **what** they want, not **how** to compute it incrementally:
+Users need to define models that execute multiple SQL statements:
 
 ```sql
 -- models/daily_revenue.sql
--- @incremental: enabled
+-- Current: Single SELECT
+SELECT order_date, customer_id, SUM(amount) as total
+FROM smelt.ref('orders')
+GROUP BY 1, 2
+```
+
+```sql
+-- Needed: Multiple statements with control flow
+BEGIN TRANSACTION;
+
+-- Delete affected range
+DELETE FROM {{ target_table }}
+WHERE order_date >= {{ smelt.batch_start() }}
+  AND order_date < {{ smelt.batch_end() }};
+
+-- Insert fresh data
+INSERT INTO {{ target_table }}
+SELECT order_date, customer_id, SUM(amount) as total
+FROM smelt.ref('orders')
+WHERE order_date >= {{ smelt.batch_start() }}
+  AND order_date < {{ smelt.batch_end() }}
+GROUP BY 1, 2;
+
+COMMIT;
+```
+
+#### 2. Run Context Access
+
+Users need access to runtime information via built-in functions:
+
+```sql
+smelt.is_incremental()           -- Boolean: incremental run or full refresh?
+smelt.batch_start()              -- Start of current batch time range
+smelt.batch_end()                -- End of current batch time range
+smelt.watermark('column_name')   -- Last processed value
+smelt.target_table()             -- Name of the target table being written to
+smelt.config('key', 'default')   -- Read model configuration
+```
+
+#### 3. State Management
+
+Users need to read and update persistent state:
+
+```sql
+-- Read last watermark
+SELECT * FROM source
+WHERE updated_at > smelt.watermark('updated_at')
+
+-- Update watermark (framework tracks this automatically from INSERT)
+-- Or explicit: smelt.set_watermark('updated_at', MAX(updated_at))
+```
+
+#### 4. Conditional Logic
+
+Users need branching logic (similar to dbt's Jinja):
+
+```sql
+{% if smelt.is_incremental() %}
+  -- Incremental path: DELETE + INSERT
+  DELETE FROM {{ smelt.target_table() }}
+  WHERE date >= {{ smelt.batch_start() }};
+
+  INSERT INTO {{ smelt.target_table() }}
+  SELECT * FROM source WHERE date >= {{ smelt.batch_start() }};
+{% else %}
+  -- Full refresh path: CREATE OR REPLACE
+  SELECT * FROM source;
+{% endif %}
+```
+
+**Alternative**: Multi-statement models with smelt functions (no templating):
+
+```sql
+-- Framework automatically skips DELETE on full refresh
+DELETE FROM smelt.target()
+WHERE date >= smelt.batch_start()
+  AND smelt.is_incremental();  -- Evaluates to WHERE FALSE on full refresh
+
+INSERT INTO smelt.target()
+SELECT * FROM source
+WHERE date >= smelt.coalesce(smelt.batch_start(), '1970-01-01');
+```
+
+#### 5. Model Composition / Macros
+
+Users should be able to create reusable incremental patterns:
+
+```sql
+-- macros/incremental_delete_insert.sql
+{% macro incremental_delete_insert(time_column, batch_size='1 day') %}
+BEGIN TRANSACTION;
+
+DELETE FROM {{ smelt.target_table() }}
+WHERE {{ time_column }} >= {{ smelt.batch_start() }}
+  AND {{ time_column }} < {{ smelt.batch_end() }}
+  AND {{ smelt.is_incremental() }};
+
+INSERT INTO {{ smelt.target_table() }}
+{{ caller() }}  -- User's SELECT goes here
+WHERE {{ time_column }} >= {{ smelt.batch_start() }}
+  AND {{ time_column }} < {{ smelt.batch_end() }};
+
+COMMIT;
+{% endmacro %}
+```
+
+```sql
+-- models/daily_revenue.sql
+{% call incremental_delete_insert('order_date') %}
+  SELECT order_date, customer_id, SUM(amount) as total
+  FROM smelt.ref('orders')
+  GROUP BY 1, 2
+{% endcall %}
+```
+
+### What smelt Provides (Framework Responsibilities)
+
+While users write the incremental logic, smelt provides:
+
+1. **Execution orchestration** - Run models in dependency order, handle batching
+2. **State persistence** - Store watermarks, run metadata
+3. **Configuration management** - Read batch_size, lookback from config
+4. **Batch boundary calculation** - Determine what batches need processing
+5. **Transaction management** - Ensure atomic commits
+6. **Error recovery** - Resume from failed batches
+7. **Semantic analysis** - Validate safety (warn if unsafe patterns detected)
+
+### Example: User-Implemented Incremental Pattern
+
+Here's how a user would implement delete+insert incrementalization:
+
+```sql
+-- models/daily_revenue.sql
 -- @incremental.time_column: order_date
 -- @incremental.batch_size: 1 day
 -- @incremental.lookback: 3 days
 
+{% if smelt.is_incremental() %}
+  -- Incremental: delete affected range, then insert
+  DELETE FROM {{ smelt.target_table() }}
+  WHERE order_date >= {{ smelt.batch_start() }}
+    AND order_date < {{ smelt.batch_end() }};
+{% endif %}
+
+-- Both full refresh and incremental execute this INSERT
+INSERT INTO {{ smelt.target_table() }}
 SELECT
   order_date,
   customer_id,
   SUM(amount) as total
 FROM smelt.ref('orders')
-GROUP BY 1, 2
+WHERE
+  {% if smelt.is_incremental() %}
+    order_date >= {{ smelt.batch_start() }}
+    AND order_date < {{ smelt.batch_end() }}
+  {% else %}
+    TRUE  -- Full refresh: process all data
+  {% endif %}
+GROUP BY 1, 2;
 ```
 
-Or in YAML config:
+### Benefits of This Approach
+
+**Transparency**: Users see exactly what SQL is executed, not framework magic
+
+**Flexibility**: Users can customize incremental strategy per model:
+- MERGE instead of DELETE+INSERT
+- Custom conflict resolution
+- Multi-step transformations
+- Complex state management
+
+**Innovation**: Users can create new patterns:
+- Incremental with deduplication
+- Incremental with slowly changing dimensions
+- Custom backfill strategies
+- Conditional full refreshes
+
+**Learning**: Framework can suggest optimizations by analyzing user patterns
+
+### Framework-Provided Helpers (Optional)
+
+smelt could provide optional built-in macros for common patterns:
+
+```sql
+-- Using built-in helper
+{% use smelt.patterns.incremental_delete_insert %}
+
+SELECT order_date, customer_id, SUM(amount) as total
+FROM smelt.ref('orders')
+GROUP BY 1, 2;
+```
+
+This is convenience, not magic - users can view the macro source and customize.
+
+### Semantic Analysis and Safety
+
+smelt can still analyze user-written incremental models:
+
+```
+$ smelt run --incremental
+
+Analyzing daily_revenue...
+  ⚠️  Warning: Window function ROW_NUMBER() OVER (PARTITION BY user_id ...)
+      This may be unsafe for incremental builds.
+      Each batch only sees a subset of user_id rows.
+
+      Options:
+        1. Add user_id to batch partitioning (makes it safe)
+        2. Add lookback to window context
+        3. Force full refresh for this model
+
+  ✓  Incremental logic looks safe for delete+insert strategy
+  ✓  Time column 'order_date' found in GROUP BY (partition-independent)
+```
+
+### Missing Features from Current Design
+
+To enable user-implemented incrementalization, smelt needs:
+
+| Feature | Current Status | Needed For |
+|---------|----------------|------------|
+| **Multi-statement models** | ❌ Only single SELECT | DELETE + INSERT transactions |
+| **Template/macro system** | ❌ No templating | Conditional logic, reusable patterns |
+| **Runtime context functions** | ❌ No built-ins | Access to batch boundaries, watermarks |
+| **Target table reference** | ❌ Can't reference output | DELETE from target, MERGE into target |
+| **State API** | ❌ No state management | Read/write watermarks, custom state |
+| **Model composition** | ❌ No macro/include | Share incremental patterns across models |
+| **Transaction control** | ❌ Framework-managed only | User-controlled BEGIN/COMMIT |
+
+### Configuration
+
+Users configure their models with metadata that smelt uses for orchestration:
+
 ```yaml
 # smelt.yml
 models:
   daily_revenue:
     incremental:
-      enabled: true
-      time_column: order_date
-      batch_size: 1 day
-      lookback: 3 days
-      strategy: auto  # auto, merge, insert_overwrite, delete_insert
+      time_column: order_date       # Which column defines batches
+      batch_size: 1 day              # Logical grain
+      lookback: 3 days               # Reprocess recent batches (late arrivals)
 ```
 
-The framework:
-1. Analyzes the model semantics
-2. Determines the safest incremental strategy
-3. Generates appropriate physical SQL
-4. Handles edge cases (late arrivals, updates, deletes)
-
-### Incremental Strategies
-
-#### Strategy 1: INSERT (Append-Only)
-
-**When**: Model only appends new rows, never updates existing.
-
+Or as annotations:
 ```sql
-INSERT INTO model_table
-SELECT ... FROM source WHERE time_column > :last_watermark;
-```
+-- models/daily_revenue.sql
+-- @incremental.time_column: order_date
+-- @incremental.batch_size: 1 day
+-- @incremental.lookback: 3 days
 
-#### Strategy 2: MERGE/UPSERT
+{% if smelt.is_incremental() %}
+  DELETE FROM {{ smelt.target_table() }}
+  WHERE order_date >= {{ smelt.batch_start() }};
+{% endif %}
 
-**When**: Model has a unique key, rows may be updated.
-
-```sql
--- @incremental.unique_key: order_id
-
-MERGE INTO orders_processed AS target
-USING (SELECT * FROM orders WHERE updated_at > :last_run) AS source
-ON target.order_id = source.order_id
-WHEN MATCHED THEN UPDATE SET ...
-WHEN NOT MATCHED THEN INSERT ...;
-```
-
-#### Strategy 3: DELETE + INSERT (Time Range)
-
-**When**: Aggregations over time-partitioned data.
-
-```sql
-BEGIN TRANSACTION;
-DELETE FROM model_table WHERE time_col >= :batch_start AND time_col < :batch_end;
-INSERT INTO model_table SELECT ... WHERE time_col >= :batch_start AND time_col < :batch_end;
-COMMIT;
-```
-
-#### Strategy 4: Partition Overwrite
-
-**When**: Backend supports partition-level operations (Databricks, BigQuery).
-
-```sql
--- Databricks
-INSERT OVERWRITE daily_revenue PARTITION (order_date)
-SELECT ... WHERE order_date >= :batch_start;
-```
-
-### Semantic Safety Analysis
-
-smelt analyzes SQL to determine what's safe for incrementalization:
-
-| Pattern | Increment-Safe? | Strategy |
-|---------|-----------------|----------|
-| Append-only (no updates) | ✅ Yes | INSERT |
-| Has unique key | ✅ Yes | MERGE/UPSERT |
-| Window functions over time | ⚠️ Depends | INSERT + lookback |
-| Window functions over entity | ❌ No | Full refresh |
-| Aggregations with time key | ✅ Yes | DELETE + INSERT by time |
-| Aggregations without time | ❌ No | Full refresh |
-
-**Safe patterns** (can increment):
-```sql
--- ✅ Filter on source's time column
-SELECT * FROM smelt.ref('events') WHERE event_time > :watermark
-
--- ✅ Aggregation with time key in GROUP BY
-SELECT date, SUM(amount) FROM orders GROUP BY date
-
--- ✅ Window function partitioned by time
-SELECT date, user_id, ROW_NUMBER() OVER (PARTITION BY date ORDER BY ts)
-FROM events
-```
-
-**Unsafe patterns** (require full refresh):
-```sql
--- ❌ Global aggregation (no time boundary)
-SELECT COUNT(*) FROM events
-
--- ❌ Window over full history
-SELECT user_id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY ts)
-FROM events  -- Each new row changes numbering of ALL user's rows
-
--- ❌ Self-join without time bounds
-SELECT a.*, b.related FROM orders a JOIN orders b ON a.related_id = b.id
-```
-
-### State Management
-
-Track watermarks and batch state:
-
-```yaml
-# .smelt/state/daily_revenue.state.yaml
-model: daily_revenue
-watermark:
-  column: order_date
-  value: 2024-01-17
-  updated_at: 2024-01-18T06:00:00Z
-last_run:
-  started_at: 2024-01-18T06:00:00Z
-  completed_at: 2024-01-18T06:02:34Z
-  rows_affected: 15234
-  strategy: delete_insert
-```
-
-For microbatch execution with lookback:
-```
-batch_size: 1 day
-lookback: 3 days
-
-# Processing 2024-01-18:
-# Batch 1: 2024-01-15 (lookback - handles late arrivals)
-# Batch 2: 2024-01-16 (lookback)
-# Batch 3: 2024-01-17 (lookback)
-# Batch 4: 2024-01-18 (current)
+INSERT INTO {{ smelt.target_table() }}
+SELECT order_date, customer_id, SUM(amount)
+FROM smelt.ref('orders')
+WHERE order_date >= {{ smelt.batch_start() }}
+GROUP BY 1, 2;
 ```
 
 ### CLI Interface
 
 ```bash
-# Full refresh (existing behavior)
+# Full refresh
 smelt run
 
-# Incremental run
+# Incremental run (processes new batches based on watermarks)
 smelt run --incremental
 
 # Run specific date range
@@ -772,7 +870,7 @@ smelt run --incremental --start-date 2024-01-15 --end-date 2024-01-18
 # Force full refresh for specific model
 smelt run --full-refresh --select daily_revenue
 
-# Show what would be processed
+# Dry run (show what would be processed)
 smelt run --incremental --dry-run
 
 # Show watermark state
@@ -785,7 +883,7 @@ smelt state reset daily_revenue --from 2024-01-01
 
 ### Comparison with dbt Microbatch
 
-**dbt approach** (user writes incremental logic):
+**dbt approach** (framework generates incremental logic):
 ```sql
 {{ config(
     materialized='incremental',
@@ -803,108 +901,46 @@ WHERE order_date >= '{{ var("start_date") }}'
 GROUP BY 1, 2
 ```
 
-**smelt approach** (framework generates incremental logic):
+**smelt approach** (user writes incremental logic, framework orchestrates):
 ```sql
--- @incremental: enabled
 -- @incremental.time_column: order_date
+-- @incremental.batch_size: 1 day
 
+{% if smelt.is_incremental() %}
+  DELETE FROM {{ smelt.target_table() }}
+  WHERE order_date >= {{ smelt.batch_start() }};
+{% endif %}
+
+INSERT INTO {{ smelt.target_table() }}
 SELECT order_date, customer_id, SUM(amount)
 FROM smelt.ref('orders')
-GROUP BY 1, 2
+WHERE order_date >= {{ smelt.batch_start() }}
+GROUP BY 1, 2;
 ```
 
-Key differences:
-- smelt infers the time filter from configuration (no manual `{% if is_incremental() %}`)
-- smelt validates that GROUP BY includes time column (safe for delete+insert)
-- smelt generates multi-statement transactions when needed
-- smelt can optimize batch boundaries across models in the DAG
-- Single smelt invocation processes all batches (dbt runs once per batch)
-- **Dynamic batch sizing** - smelt chooses optimal batch grouping at runtime (see below)
+**Key differences:**
 
-### Dynamic Batch Sizing
+| Aspect | dbt | smelt |
+|--------|-----|-------|
+| **Who writes logic** | Framework magic | User explicit |
+| **Transparency** | Hidden DELETE | Visible in model |
+| **Flexibility** | Fixed strategies | User-customizable |
+| **Semantics** | Parse SQL | Parse + understand |
+| **Validation** | Runtime errors | Static analysis warnings |
+| **Customization** | Limited config | Full SQL control |
+| **Learning curve** | Lower (less to write) | Higher (more powerful) |
 
-**dbt's limitation**: Microbatch always runs one query per batch period. A 90-day backfill with `batch_size: day` means 90 separate queries, even when running them together would be faster.
+smelt prioritizes **transparency and power** over simplicity. Users see exactly what runs, can customize every detail, and the framework provides analysis and orchestration.
 
-**smelt's approach**: The `batch_size` in configuration defines the *logical grain* (how data is partitioned), but smelt chooses the *physical batch grouping* at runtime based on context:
+### Framework Optimizations (Optional)
 
-```yaml
-# Configuration defines logical grain
-incremental:
-  time_column: order_date
-  batch_size: 1 day      # Logical: data is day-partitioned
-  lookback: 3 days
-```
+Even with user-written incremental logic, smelt can provide intelligent orchestration:
 
-```bash
-# Daily run: process today + 3 day lookback = 4 day-batches
-# smelt might run as 1 query covering 4 days (if safe)
-smelt run --incremental
+#### Dynamic Batch Grouping
 
-# Backfill 90 days: smelt can group into larger physical batches
-smelt run --incremental --start-date 2024-01-01 --end-date 2024-03-31
-# Instead of 90 queries, might run 12-13 weekly batches
-```
+**The problem**: A 90-day backfill with `batch_size: 1 day` naively means 90 query executions.
 
-#### Batch Grouping Strategies
-
-smelt can dynamically choose batch grouping based on:
-
-| Context | Strategy | Example |
-|---------|----------|---------|
-| Daily run | Small batches | 1-4 days per query |
-| Backfill | Large batches | 1 week or 1 month per query |
-| After failure | Resume from checkpoint | Only pending batches |
-| Resource-constrained | Smaller batches | Fit in memory |
-
-#### When Batches Can Be Merged
-
-smelt analyzes the model to determine if multiple logical batches can be combined into one physical query:
-
-**Can merge** (partition-independent):
-```sql
--- ✅ Aggregation with time key - each day is independent
-SELECT order_date, SUM(amount) FROM orders GROUP BY order_date
-
--- ✅ Window partitioned by time - each day is independent
-SELECT order_date, user_id,
-       ROW_NUMBER() OVER (PARTITION BY order_date, user_id ORDER BY ts)
-FROM events
-```
-
-**Cannot merge** (batches affect each other):
-```sql
--- ❌ Running total across days - day N depends on day N-1
-SELECT order_date, SUM(amount) OVER (ORDER BY order_date) as running_total
-FROM daily_totals
-
--- ❌ Cross-day deduplication
-SELECT DISTINCT user_id, MIN(first_seen_date) FROM events GROUP BY user_id
-```
-
-#### CLI Control
-
-Users can override batch grouping when needed:
-
-```bash
-# Let smelt choose optimal grouping (default)
-smelt run --incremental --start-date 2024-01-01 --end-date 2024-03-31
-
-# Force weekly batches
-smelt run --incremental --start-date 2024-01-01 --end-date 2024-03-31 \
-  --batch-group "1 week"
-
-# Force one query for entire range (if model supports it)
-smelt run --incremental --start-date 2024-01-01 --end-date 2024-03-31 \
-  --batch-group all
-
-# Force per-day execution (dbt-style, for debugging)
-smelt run --incremental --start-date 2024-01-01 --end-date 2024-03-31 \
-  --batch-group "1 day"
-```
-
-#### Automatic Optimization
-
-For large backfills, smelt can automatically determine optimal batch grouping:
+**smelt's optimization**: The `batch_size` defines logical grain, but smelt can group multiple batches into one execution when safe:
 
 ```
 $ smelt run --incremental --start-date 2024-01-01 --end-date 2024-03-31
@@ -914,42 +950,38 @@ Analyzing models for batch optimization...
 daily_revenue:
   Logical batches: 90 days
   Model is partition-independent ✓
-  Optimal grouping: 7 days (13 physical batches)
-  Estimated speedup: ~6x vs per-day execution
+  Can process in 13 weekly executions instead of 90 daily
+  Estimated speedup: ~6x
 
 user_sessions:
   Logical batches: 90 days
-  Model has cross-partition window functions ✗
-  Required grouping: 1 day (90 physical batches)
-  Note: Cannot merge due to LAG() over user_id
+  Model has cross-partition dependencies ✗
+  Must process per-day (90 executions)
+  Reason: LAG() window function over user_id crosses batch boundaries
 
-Proceed? [Y/n]
+Proceed with optimized plan? [Y/n]
 ```
 
-### Cross-Model Optimization
+Users can override:
+```bash
+# Force specific grouping
+smelt run --incremental --batch-group "1 week"
 
-When downstream models filter on time, smelt can optimize upstream:
+# Force one execution for entire range
+smelt run --incremental --batch-group all
 
-```sql
--- downstream filters on date
-SELECT * FROM smelt.ref('upstream') WHERE event_date = '2024-01-18'
-
--- smelt can:
--- 1. Only compute upstream for 2024-01-18
--- 2. Skip upstream entirely if that partition exists and is fresh
+# Debug mode: one execution per logical batch
+smelt run --incremental --batch-group "1 day"
 ```
 
-For models sharing a dependency:
-```
-orders (source)
-  ├── daily_revenue   (batch by order_date)
-  └── daily_orders    (batch by order_date)
-```
+#### Cross-Model Optimization
 
-smelt can:
+When models share dependencies, smelt can:
 1. Compute shared batches together
 2. Parallelize independent batches
 3. Skip batches where all downstream models are up-to-date
+
+These are framework optimizations - users write standard incremental logic, smelt optimizes execution.
 
 ---
 
