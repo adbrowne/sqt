@@ -166,10 +166,11 @@ async fn run(args: RunArgs) -> Result<()> {
                     anyhow::anyhow!("Spark target requires 'connect_url' field")
                 })?;
 
+                let default_catalog = "spark_catalog".to_string();
                 let catalog = target_config
                     .catalog
                     .as_ref()
-                    .unwrap_or(&"spark_catalog".to_string());
+                    .unwrap_or(&default_catalog);
 
                 println!("\nBackend: Spark");
                 println!("Connect URL: {}", connect_url);
