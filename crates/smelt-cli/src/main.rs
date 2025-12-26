@@ -1,12 +1,16 @@
 use anyhow::{Context, Result};
 use arrow::util::pretty;
 use clap::{Parser, Subcommand};
-use smelt_cli::{
-    executor, find_project_root, Config, DependencyGraph, ModelDiscovery, SourceConfig,
-    SqlCompiler,
-};
+use smelt_backend::Backend;
 use smelt_backend_duckdb::DuckDbBackend;
+use smelt_cli::{
+    executor, find_project_root, BackendType, Config, DependencyGraph, ModelDiscovery,
+    SourceConfig, SqlCompiler,
+};
 use std::path::PathBuf;
+
+#[cfg(feature = "spark")]
+use smelt_backend_spark::SparkBackend;
 
 #[derive(Parser)]
 #[command(name = "smelt")]
@@ -71,17 +75,14 @@ async fn run(args: RunArgs) -> Result<()> {
 
     println!("Project: {} (version {})", config.name, config.version);
 
-    // Get target config and extract values we need
-    let (target_database, target_schema) = {
-        let target_config = config.targets.get(&args.target).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Target '{}' not found in smelt.yml. Available targets: {}",
-                args.target,
-                config.targets.keys().cloned().collect::<Vec<_>>().join(", ")
-            )
-        })?;
-        (target_config.database.clone(), target_config.schema.clone())
-    };
+    // Get target config
+    let target_config = config.targets.get(&args.target).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Target '{}' not found in smelt.yml. Available targets: {}",
+            args.target,
+            config.targets.keys().cloned().collect::<Vec<_>>().join(", ")
+        )
+    })?;
 
     // Load source configuration (optional)
     let sources = SourceConfig::load(&project_dir).ok();
@@ -141,26 +142,65 @@ async fn run(args: RunArgs) -> Result<()> {
         return Ok(());
     }
 
-    // 6. Setup DuckDB
-    let db_path = args.database.unwrap_or_else(|| {
-        project_dir.join(&target_database)
-    });
+    // 6. Create backend based on target type
+    let backend: Box<dyn Backend> = match target_config.backend_type() {
+        BackendType::DuckDB => {
+            let database = target_config.database.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("DuckDB target requires 'database' field")
+            })?;
 
-    println!("\nDatabase: {}", db_path.display());
+            let db_path = args.database.unwrap_or_else(|| project_dir.join(database));
+            println!("\nBackend: DuckDB");
+            println!("Database: {}", db_path.display());
 
-    let backend = DuckDbBackend::new(&db_path, &target_schema)
-        .await
-        .with_context(|| format!("Failed to initialize DuckDB at {:?}", db_path))?;
+            Box::new(
+                DuckDbBackend::new(&db_path, &target_config.schema)
+                    .await
+                    .with_context(|| format!("Failed to initialize DuckDB at {:?}", db_path))?,
+            )
+        }
+        BackendType::Spark => {
+            #[cfg(feature = "spark")]
+            {
+                let connect_url = target_config.connect_url.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("Spark target requires 'connect_url' field")
+                })?;
+
+                let catalog = target_config
+                    .catalog
+                    .as_ref()
+                    .unwrap_or(&"spark_catalog".to_string());
+
+                println!("\nBackend: Spark");
+                println!("Connect URL: {}", connect_url);
+                println!("Catalog: {}", catalog);
+
+                Box::new(
+                    SparkBackend::new(connect_url, catalog, &target_config.schema)
+                        .await
+                        .with_context(|| {
+                            format!("Failed to connect to Spark at {}", connect_url)
+                        })?,
+                )
+            }
+            #[cfg(not(feature = "spark"))]
+            {
+                return Err(anyhow::anyhow!(
+                    "Spark backend not available. Rebuild with --features spark"
+                ));
+            }
+        }
+    };
 
     // 7. Validate sources exist (if sources.yml present)
     if let Some(ref source_config) = sources {
-        executor::validate_sources(&backend, source_config)
+        executor::validate_sources(backend.as_ref(), source_config)
             .await
             .with_context(|| "Source validation failed")?;
     }
 
     // 8. Compile and execute each model
-    let compiler = SqlCompiler::new(config);
+    let compiler = SqlCompiler::new(config.clone());
 
     println!("\n{}", "=".repeat(60));
     println!("Executing models...");
@@ -175,7 +215,7 @@ async fn run(args: RunArgs) -> Result<()> {
 
         // Compile
         let compiled = compiler
-            .compile(model, &target_schema)
+            .compile(model, &target_config.schema)
             .with_context(|| format!("Failed to compile model: {}", model_name))?;
 
         if args.verbose {
@@ -188,7 +228,7 @@ async fn run(args: RunArgs) -> Result<()> {
         }
 
         // Execute
-        let result = executor::execute_model(&backend, &compiled, &target_schema, args.show_results)
+        let result = executor::execute_model(backend.as_ref(), &compiled, &target_config.schema, args.show_results)
             .await
             .with_context(|| format!("Failed to execute model: {}", model_name))?;
 
@@ -213,7 +253,6 @@ async fn run(args: RunArgs) -> Result<()> {
     println!("Summary");
     println!("{}", "=".repeat(60));
     println!("✓ Executed {} models successfully", results.len());
-    println!("  Database: {}", db_path.display());
 
     let total_duration: std::time::Duration = results.iter().map(|r| r.duration).sum();
     println!("  Total time: {:?}", total_duration);

@@ -15,6 +15,7 @@ smelt-parser = { path = "../smelt-parser" }
 smelt-db = { path = "../smelt-db" }
 smelt-backend = { path = "../smelt-backend" }
 smelt-backend-duckdb = { path = "../smelt-backend-duckdb" }
+smelt-backend-spark = { path = "../smelt-backend-spark", optional = true }
 
 # Parser dependencies (for TextRange, etc.)
 rowan.workspace = true
@@ -41,3 +42,8 @@ walkdir = "2.4"
 
 [dev-dependencies]
 tempfile = "3.8"
+
+[features]
+default = ["duckdb"]
+duckdb = []
+spark = ["smelt-backend-spark"]

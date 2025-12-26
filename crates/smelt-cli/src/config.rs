@@ -39,7 +39,7 @@ impl Serialize for Materialization {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub name: String,
     pub version: u32,
@@ -60,15 +60,39 @@ fn default_materialization() -> Materialization {
     Materialization::View
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Target {
     #[serde(rename = "type")]
     pub target_type: String,
-    pub database: String,
+    // DuckDB fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
     pub schema: String,
+    // Spark fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connect_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+impl Target {
+    /// Get the backend type from the target_type field.
+    pub fn backend_type(&self) -> BackendType {
+        match self.target_type.to_lowercase().as_str() {
+            "duckdb" => BackendType::DuckDB,
+            "spark" => BackendType::Spark,
+            _ => BackendType::DuckDB, // Default to DuckDB for backward compatibility
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendType {
+    DuckDB,
+    Spark,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModelConfig {
     pub materialization: Materialization,
 }

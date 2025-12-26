@@ -73,8 +73,10 @@ mod tests {
             "dev".to_string(),
             Target {
                 target_type: "duckdb".to_string(),
-                database: "test.duckdb".to_string(),
+                database: Some("test.duckdb".to_string()),
                 schema: "main".to_string(),
+                connect_url: None,
+                catalog: None,
             },
         );
 

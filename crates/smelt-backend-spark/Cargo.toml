@@ -1,0 +1,28 @@
+[package]
+name = "smelt-backend-spark"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Spark backend implementation for smelt"
+
+[dependencies]
+# Backend trait
+smelt-backend = { path = "../smelt-backend" }
+
+# Arrow (for RecordBatch type)
+arrow.workspace = true
+
+# Async runtime
+tokio.workspace = true
+async-trait = "0.1"
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# TODO: Add spark-connect when implementing real Spark Connect integration
+# spark-connect = "0.1"  # Requires protoc installed
+
+[dev-dependencies]
+tempfile = "3.8"
