@@ -1,6 +1,6 @@
 # smelt Development Roadmap
 
-This document tracks the implementation status of the smelt parser and LSP, aligned with the spec in [README.md](../README.md).
+This document tracks the implementation status of smelt, aligned with the spec in [DESIGN.md](DESIGN.md).
 
 ## Current Status
 
@@ -176,125 +176,117 @@ Can follow similar pattern to RefCall implementation:
 
 ---
 
-## Next Steps (Choose One)
+## 🔄 Phase 4: Spark Backend (NEXT)
 
-### Option A: Named Parameter Compilation ⭐ Recommended
+**Status**: Next priority
+
+### Why Spark Next
+
+Adding a second backend now validates the multi-backend architecture before building more features on top. Key architectural questions to answer:
+
+1. **Backend abstraction**: How to abstract SQL dialect differences?
+2. **Connection management**: How to configure and manage connections?
+3. **Execution model**: How to handle remote execution vs local?
+4. **Type mapping**: How to map types between backends?
+
+### What to Implement
+
+1. **Backend trait** - Abstract interface for execution backends
+   ```rust
+   trait Backend {
+       fn execute(&self, sql: &str) -> Result<ExecutionResult>;
+       fn create_table(&self, name: &str, sql: &str) -> Result<()>;
+       fn supports(&self, capability: Capability) -> bool;
+   }
+   ```
+
+2. **Spark executor** - Databricks/Spark SQL execution
+   - Connect via Databricks SQL connector or Spark Connect
+   - Handle Spark-specific SQL dialect differences
+   - Map Arrow types between systems
+
+3. **Target configuration** - Per-model or global target selection
+   ```yaml
+   # smelt.yml
+   targets:
+     dev:
+       backend: duckdb
+       database: dev.db
+     prod:
+       backend: spark
+       host: my-workspace.databricks.com
+       warehouse_id: abc123
+   ```
+
+4. **CLI target selection**
+   ```bash
+   smelt run --target prod
+   smelt run --target dev  # default
+   ```
+
+### Dialect Differences to Handle
+
+| Feature | DuckDB | Spark SQL |
+|---------|--------|-----------|
+| String concat | `\|\|` | `CONCAT()` or `\|\|` |
+| Date functions | `DATE '2024-01-01'` | `DATE('2024-01-01')` |
+| QUALIFY | ✅ Native | ❌ Subquery rewrite |
+| MERGE | ✅ Native | ✅ Delta Lake |
+| Array syntax | `[1, 2, 3]` | `ARRAY(1, 2, 3)` |
+
+### Effort
+
+Medium-High - requires new crate, connection handling, dialect abstraction
+
+### Files
+
+- `crates/smelt-backend/` - New crate for backend abstraction
+- `crates/smelt-cli/src/executor.rs` - Refactor to use backend trait
+- `crates/smelt-cli/src/config.rs` - Add target configuration
+
+---
+
+## Other Options (Deferred)
+
+These are valuable but deferred until multi-backend architecture is validated:
+
+### Named Parameter Compilation
 
 **Value**: Make named parameters functional in CLI execution
 
-**Work**:
-1. Implement `filter =>` parameter compilation in `smelt-cli/src/compiler.rs`:
-   - Parse filter expression from named parameter
-   - Inject as WHERE clause in compiled SQL
-   - Combine with existing WHERE clauses using AND
-2. Add tests for filter parameter compilation
-3. Update test-workspace to use parameterized refs
-4. Add LSP validation for parameter types
+**Work**: Implement `filter =>` parameter compilation - parse filter expression, inject as WHERE clause.
 
-**Effort**: Medium (requires SQL AST manipulation)
-
-**Files**: `crates/smelt-cli/src/compiler.rs`, `crates/smelt-lsp/src/main.rs`
-
-**Value**: Unlocks the full power of `smelt.ref()` parameters for filtering, partitioning, etc.
+**Effort**: Medium
 
 ---
 
-### Option B: Incremental Materialization
+### Incremental Materialization
 
 **Value**: Faster execution by only recomputing changed data
 
-**Work**:
-1. Track model state (last run timestamp, row counts)
-2. Detect incremental-safe models (append-only, time-based filters)
-3. Generate incremental SQL (INSERT INTO ... WHERE timestamp > last_run)
-4. Handle failures and full refresh scenarios
+**Work**: Track model state, detect incremental-safe models, generate incremental SQL. See [DESIGN.md](DESIGN.md#incremental-table-builds) for full design.
 
-**Effort**: Medium-High (requires state management)
-
-**Files**: `crates/smelt-cli/src/executor.rs`, new state tracking module
+**Effort**: Medium-High
 
 ---
 
-### Option C: Column Schema Tracking
+### JOIN Syntax Support
+
+**Value**: Enable standard SQL JOIN syntax
+
+**Work**: Add JOIN keywords to lexer, update parser, add AST support.
+
+**Effort**: Medium
+
+---
+
+### Column Schema Tracking
 
 **Value**: Enable smarter LSP features (autocomplete, validation)
 
-**Work**:
-1. Track column schemas in smelt-db
-2. Infer output columns from SELECT statements
-3. Validate column references in expressions
-4. Add LSP autocomplete for column names
+**Work**: Track column schemas, infer output columns, validate references.
 
-**Effort**: Medium (requires SQL analysis logic)
-
-**Files**: `crates/smelt-db/src/lib.rs`, `crates/smelt-lsp/src/main.rs`
-
----
-
-### Option C: JOIN Syntax Support
-
-**Value**: Enable standard SQL JOIN syntax for improved readability
-
-**Work**:
-1. Add JOIN keywords to lexer (JOIN, LEFT, RIGHT, INNER, OUTER, CROSS, ON)
-2. Update `parse_from_clause()` to handle JOIN clauses
-3. Add JOIN_CLAUSE node type and AST support
-4. Parse ON conditions (join predicates)
-5. Update tests to use JOIN syntax where appropriate
-
-**Effort**: Medium (requires parser changes and new node types)
-
-**Files**: `crates/smelt-parser/src/lexer.rs`, `crates/smelt-parser/src/parser.rs`, `crates/smelt-parser/src/syntax_kind.rs`, `crates/smelt-parser/src/ast.rs`
-
-**Note**: Currently the parser only supports comma-separated table references (e.g., `FROM table1, table2 WHERE ...`). Adding JOIN support would allow standard syntax like `FROM table1 JOIN table2 ON ...`.
-
----
-
-### Option D: Testing Framework
-
-**Value**: Confidence in parser/AST correctness
-
-**Work**:
-1. Add parser tests for various SQL patterns
-2. Add AST tests for ref/parameter extraction
-3. Add integration tests for LSP features
-4. Test error recovery scenarios
-
-**Effort**: Low-Medium (infrastructure setup)
-
-**Files**: New test files in `crates/smelt-parser/tests/`, `crates/smelt-lsp/tests/`
-
----
-
-### Option E: VSCode Extension Improvements
-
-**Value**: Better developer experience
-
-**Work**:
-1. Add syntax highlighting for `smelt.ref()` and parameters
-2. Add snippets for common patterns
-3. Improve error message formatting
-4. Add "Find All References" support
-
-**Effort**: Low (VSCode extension work)
-
-**Files**: `editors/vscode/syntaxes/`, `editors/vscode/package.json`
-
----
-
-### Option F: Documentation & Examples
-
-**Value**: Help future users/contributors
-
-**Work**:
-1. Document parser architecture
-2. Document AST traversal patterns
-3. Add more test workspace examples
-4. Write getting-started guide
-
-**Effort**: Low (documentation)
-
-**Files**: New docs in `docs/`, expanded examples in `test-workspace/`
+**Effort**: Medium
 
 ---
 
@@ -345,9 +337,9 @@ These features require significant architectural work and are deferred:
 
 When working on the next phase:
 
-1. **Before starting**: Review the spec in [README.md](../README.md) for requirements
+1. **Before starting**: Review the spec in [DESIGN.md](DESIGN.md) for requirements
 2. **During development**: Update this roadmap with progress
-3. **After completion**: Mark phase as complete with commit hash
+3. **After completion**: Mark phase as complete with date
 4. **Add tests**: Ensure new features have test coverage
 5. **Update docs**: Keep CLAUDE.md and comments up to date
 
