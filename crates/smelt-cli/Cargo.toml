@@ -13,9 +13,13 @@ path = "src/main.rs"
 # Core smelt dependencies
 smelt-parser = { path = "../smelt-parser" }
 smelt-db = { path = "../smelt-db" }
+smelt-backend = { path = "../smelt-backend" }
 
 # Parser dependencies (for TextRange, etc.)
 rowan.workspace = true
+
+# Async runtime
+tokio.workspace = true
 
 # Execution
 duckdb.workspace = true

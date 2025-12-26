@@ -1,0 +1,68 @@
+//! Backend error types.
+
+use thiserror::Error;
+
+/// Errors that can occur during backend operations.
+#[derive(Error, Debug)]
+pub enum BackendError {
+    /// Failed to connect to the backend.
+    #[error("Connection failed: {message}")]
+    ConnectionFailed { message: String },
+
+    /// Failed to execute a SQL query.
+    #[error("Execution failed for '{model}': {message}")]
+    ExecutionFailed { model: String, message: String },
+
+    /// Table or view not found.
+    #[error("Table or view not found: {schema}.{name}")]
+    NotFound { schema: String, name: String },
+
+    /// Schema does not exist.
+    #[error("Schema not found: {schema}")]
+    SchemaNotFound { schema: String },
+
+    /// SQL dialect feature not supported.
+    #[error("Feature not supported by {dialect}: {feature}")]
+    UnsupportedFeature { dialect: String, feature: String },
+
+    /// Configuration error.
+    #[error("Configuration error: {message}")]
+    ConfigurationError { message: String },
+
+    /// Generic backend error.
+    #[error("{0}")]
+    Other(#[from] anyhow::Error),
+}
+
+impl BackendError {
+    /// Create a connection failed error.
+    pub fn connection_failed(message: impl Into<String>) -> Self {
+        Self::ConnectionFailed {
+            message: message.into(),
+        }
+    }
+
+    /// Create an execution failed error.
+    pub fn execution_failed(model: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::ExecutionFailed {
+            model: model.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Create a not found error.
+    pub fn not_found(schema: impl Into<String>, name: impl Into<String>) -> Self {
+        Self::NotFound {
+            schema: schema.into(),
+            name: name.into(),
+        }
+    }
+
+    /// Create an unsupported feature error.
+    pub fn unsupported(dialect: impl Into<String>, feature: impl Into<String>) -> Self {
+        Self::UnsupportedFeature {
+            dialect: dialect.into(),
+            feature: feature.into(),
+        }
+    }
+}

@@ -1,0 +1,21 @@
+[package]
+name = "smelt-backend"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Backend trait and types for smelt execution engines"
+
+[dependencies]
+# Async runtime
+tokio.workspace = true
+
+# Data types
+arrow.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Async trait support
+async-trait = "0.1"

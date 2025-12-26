@@ -48,15 +48,16 @@ struct RunArgs {
     dry_run: bool,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run(args) => run(args),
+        Commands::Run(args) => run(args).await,
     }
 }
 
-fn run(args: RunArgs) -> Result<()> {
+async fn run(args: RunArgs) -> Result<()> {
     // 1. Find project root
     let project_dir = find_project_root(&args.project_dir)
         .with_context(|| format!("Failed to find project root from {:?}", args.project_dir))?;
