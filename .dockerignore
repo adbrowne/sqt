@@ -1,0 +1,39 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# Cargo cache
+.cargo/
+.cargo-cache/
+
+# Node modules
+node_modules/
+editors/vscode/out/
+editors/vscode/*.vsix
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation (will be mounted anyway)
+*.md
+
+# Test artifacts
+*.log

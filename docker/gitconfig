@@ -1,0 +1,14 @@
+[user]
+	name = Claude Code (Docker)
+	email = claude@docker.local
+
+[core]
+	editor = vi
+
+# Prevent pushing to any remote
+[remote "origin"]
+	pushurl = no_push
+
+# Alias push to prevent accidents
+[alias]
+	push = "!echo 'Push is disabled in Docker container. Commits are local only.' && false"

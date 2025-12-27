@@ -1,0 +1,31 @@
+services:
+  smelt-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smelt-claude-dev
+    volumes:
+      # Mount source code
+      - .:/workspace
+      # Exclude build artifacts (use named volumes for better performance)
+      - /workspace/target
+      - /workspace/editors/vscode/node_modules
+      # Mount a restricted git config that prevents pushing
+      - ./docker/gitconfig:/root/.gitconfig:ro
+    environment:
+      - RUST_BACKTRACE=1
+      - CARGO_HOME=/workspace/.cargo-cache
+    working_dir: /workspace
+    # Keep container running
+    stdin_open: true
+    tty: true
+    # Prevent network access to GitHub (optional - uncomment if desired)
+    # networks:
+    #   - isolated
+    command: /bin/bash
+
+# Uncomment to create an isolated network
+# networks:
+#   isolated:
+#     driver: bridge
+#     internal: true
