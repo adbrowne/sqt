@@ -300,16 +300,52 @@ Medium - requires parser updates, rewriting framework, comprehensive testing
 
 ---
 
-### Phase 8: JOIN Syntax Support
+## ✅ Phase 8: JOIN Syntax Support (COMPLETED)
 
-**Value**: Enable standard SQL JOIN syntax
+**Completed**: December 27, 2024
 
-**Work**:
-- Add JOIN keywords to lexer
-- Update parser for JOIN clauses
-- Add AST support for JOIN types and conditions
+### What Was Implemented
 
-**Effort**: Medium
+- **Full JOIN syntax support** in parser
+  - All JOIN types: INNER, LEFT, RIGHT, FULL OUTER, CROSS
+  - ON conditions with expressions
+  - USING conditions with column lists
+  - Proper error recovery for incomplete JOINs
+
+- **Lexer updates**
+  - 9 new keywords: JOIN, INNER, LEFT, RIGHT, FULL, OUTER, CROSS, ON, USING
+  - All keywords recognized case-insensitively
+
+- **Parser enhancements**
+  - parse_join_clause() with complete JOIN type handling
+  - parse_join_condition() for ON and USING clauses
+  - Updated parse_from_clause() to parse JOINs instead of comma-separated tables
+  - LSP-friendly error recovery maintains usable CST even with partial syntax
+
+- **AST wrappers**
+  - JoinClause type with join_type(), table_ref(), and condition() methods
+  - JoinType enum (Inner, Left, Right, Full, Cross)
+  - JoinCondition type with is_on(), is_using(), on_expression(), using_columns()
+  - FromClause::joins() iterator
+
+- **Examples updated**
+  - example2_naive.rs and example2_optimized.rs now use explicit CROSS JOIN
+  - Comma-separated FROM syntax no longer supported (breaking change)
+
+### Test Results
+
+All 12 parser tests passing, including:
+- INNER, LEFT, RIGHT, FULL, CROSS JOIN variants
+- ON and USING conditions
+- Multiple JOINs in sequence
+- Error recovery for missing table refs and conditions
+
+### Breaking Changes
+
+**Removed comma-separated FROM syntax:**
+- Old: `FROM users, orders`
+- New: `FROM users CROSS JOIN orders`
+- Justification: Aligns with design doc requirement for explicit JOIN syntax
 
 ---
 

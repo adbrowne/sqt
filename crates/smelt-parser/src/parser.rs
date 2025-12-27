@@ -141,7 +141,22 @@ impl<'a> Parser<'a> {
     /// Check if current token is a keyword that would end a table reference
     fn at_keyword_that_ends_table_ref(&self) -> bool {
         // Keywords that can follow a table reference in the FROM clause
-        self.at_any(&[WHERE_KW, GROUP_KW])
+        self.at_any(&[
+            WHERE_KW,
+            GROUP_KW,
+            // JOIN keywords
+            JOIN_KW,
+            INNER_KW,
+            LEFT_KW,
+            RIGHT_KW,
+            FULL_KW,
+            CROSS_KW,
+        ])
+    }
+
+    /// Check if current token can start an expression
+    fn at_expression_start(&self) -> bool {
+        self.at_any(&[IDENT, NUMBER, STRING, LPAREN, NOT_KW])
     }
 
     // ===== Parsing rules =====
@@ -251,13 +266,14 @@ impl<'a> Parser<'a> {
 
         self.expect(FROM_KW);
 
-        // Parse table references (could be identifier or template)
-        loop {
-            self.parse_table_ref();
+        // Parse first table reference (required)
+        self.parse_table_ref();
 
+        // Parse zero or more JOIN clauses
+        loop {
             self.skip_trivia();
-            if self.at(COMMA) {
-                self.advance();
+            if self.at_any(&[JOIN_KW, INNER_KW, LEFT_KW, RIGHT_KW, FULL_KW, CROSS_KW]) {
+                self.parse_join_clause();
             } else {
                 break;
             }
@@ -311,6 +327,119 @@ impl<'a> Parser<'a> {
             // Implicit alias (no AS keyword)
             // Only consume if it's not a keyword that would end the table ref
             self.advance();
+        }
+
+        self.finish_node();
+    }
+
+    #[allow(clippy::if_same_then_else)]
+    fn parse_join_clause(&mut self) {
+        self.start_node(JOIN_CLAUSE);
+
+        // Parse JOIN type modifiers (INNER, LEFT, RIGHT, FULL OUTER, CROSS)
+        // Note: The if-else blocks are intentionally similar for clarity
+        if self.at(INNER_KW) {
+            self.advance();
+            self.skip_trivia();
+        } else if self.at(LEFT_KW) {
+            self.advance();
+            self.skip_trivia();
+            if self.at(OUTER_KW) {
+                self.advance();
+                self.skip_trivia();
+            }
+        } else if self.at(RIGHT_KW) {
+            self.advance();
+            self.skip_trivia();
+            if self.at(OUTER_KW) {
+                self.advance();
+                self.skip_trivia();
+            }
+        } else if self.at(FULL_KW) {
+            self.advance();
+            self.skip_trivia();
+            if self.at(OUTER_KW) {
+                self.advance();
+                self.skip_trivia();
+            }
+        } else if self.at(CROSS_KW) {
+            self.advance();
+            self.skip_trivia();
+        }
+        // Note: Bare JOIN defaults to INNER JOIN
+
+        // Expect JOIN keyword
+        if !self.expect(JOIN_KW) {
+            // Error recovery: missing JOIN keyword
+            self.error("Expected JOIN keyword".to_string());
+            self.finish_node();
+            return;
+        }
+
+        // Parse table reference
+        self.skip_trivia();
+        if !self.at(IDENT) {
+            // Error recovery: missing table reference
+            self.error("Expected table reference after JOIN".to_string());
+            self.finish_node();
+            return;
+        }
+        self.parse_table_ref();
+
+        // Parse join condition (ON or USING)
+        // CROSS JOIN doesn't require a condition
+        self.skip_trivia();
+        if self.at(ON_KW) || self.at(USING_KW) {
+            self.parse_join_condition();
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_join_condition(&mut self) {
+        self.start_node(JOIN_CONDITION);
+
+        if self.at(ON_KW) {
+            // ON expression
+            self.advance();
+            self.skip_trivia();
+
+            if !self.at_expression_start() {
+                self.error("Expected expression after ON".to_string());
+                self.finish_node();
+                return;
+            }
+            self.parse_expression();
+
+        } else if self.at(USING_KW) {
+            // USING (col1, col2, ...)
+            self.advance();
+            self.skip_trivia();
+
+            if !self.expect(LPAREN) {
+                self.error("Expected '(' after USING".to_string());
+                self.finish_node();
+                return;
+            }
+
+            // Parse comma-separated column list
+            loop {
+                self.skip_trivia();
+                if !self.at(IDENT) {
+                    self.error("Expected column name in USING clause".to_string());
+                    break;
+                }
+                self.advance();
+
+                self.skip_trivia();
+                if self.at(COMMA) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+
+            self.expect(RPAREN);
         }
 
         self.finish_node();
@@ -532,4 +661,80 @@ impl<'a> Parser<'a> {
             self.parse_expression();
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_inner_join() {
+        let input = "SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_left_join() {
+        let input = "SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_right_join() {
+        let input = "SELECT * FROM users RIGHT JOIN orders ON users.id = orders.user_id";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_full_join() {
+        let input = "SELECT * FROM users FULL JOIN orders ON users.id = orders.user_id";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cross_join() {
+        let input = "SELECT * FROM users CROSS JOIN countries";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_joins() {
+        let input = "SELECT * FROM users
+                     INNER JOIN orders ON users.id = orders.user_id
+                     LEFT JOIN products ON orders.product_id = products.id";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_using_clause() {
+        let input = "SELECT * FROM users JOIN orders USING (user_id)";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_join_error_recovery_missing_table() {
+        let input = "SELECT * FROM users JOIN";
+        let parse = parse(input);
+        assert!(!parse.errors.is_empty());
+        assert!(parse.errors[0].message.contains("table"));
+    }
+
+    #[test]
+    fn test_join_error_recovery_missing_on() {
+        let input = "SELECT * FROM users JOIN orders ON";
+        let parse = parse(input);
+        assert!(!parse.errors.is_empty());
+        assert!(parse.errors[0].message.contains("expression"));
+    }
+
 }

@@ -52,7 +52,10 @@ fn setup_events_data(conn: &Connection) -> Result<()> {
             device_type,
             event_date,
             (RANDOM() * 100)::DECIMAL(10,2) AS revenue
-        FROM users, countries, devices, dates
+        FROM users
+        CROSS JOIN countries
+        CROSS JOIN devices
+        CROSS JOIN dates
         WHERE RANDOM() < 0.01  -- Sparse: only 1% of combinations have events
         LIMIT 10000;  -- Cap at 10k rows for demo
         "

@@ -12,9 +12,13 @@ A next-generation data pipeline tool designed to improve upon dbt by:
 - Supporting multi-backend execution (DuckDB, Databricks, etc.)
 - Using a proper language instead of Jinja templates
 
-**Current Phase**: Parser and LSP implementation - Phases 1 & 2 complete (smelt.ref() with named parameters).
+**Current Phase**: Parser and LSP implementation - Phases 1-8 complete (smelt.ref() with named parameters, full JOIN syntax).
 
 **Project Status**: Early-stage development - no backward compatibility constraints. The codebase is evolving rapidly and breaking changes are expected.
+
+**Recent Updates**:
+- **JOIN Syntax (Phase 8)**: Full support for INNER, LEFT, RIGHT, FULL, CROSS JOIN with ON/USING conditions
+- **Breaking Change**: Comma-separated FROM syntax removed (use explicit `CROSS JOIN` instead)
 
 ## Key Documentation
 

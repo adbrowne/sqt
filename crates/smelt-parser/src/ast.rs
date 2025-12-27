@@ -144,6 +144,110 @@ impl FromClause {
     pub fn table_refs(&self) -> impl Iterator<Item = TableRef> + '_ {
         self.0.children().filter_map(TableRef::cast)
     }
+
+    pub fn joins(&self) -> impl Iterator<Item = JoinClause> + '_ {
+        self.0.children().filter_map(JoinClause::cast)
+    }
+}
+
+/// JOIN clause (JOIN type + table + condition)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct JoinClause(SyntaxNode);
+
+impl JoinClause {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == JOIN_CLAUSE {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Get the JOIN type (INNER, LEFT, RIGHT, FULL, CROSS)
+    /// Returns None for bare JOIN (defaults to INNER)
+    pub fn join_type(&self) -> Option<JoinType> {
+        for token in self.0.children_with_tokens().filter_map(|e| e.into_token()) {
+            match token.kind() {
+                INNER_KW => return Some(JoinType::Inner),
+                LEFT_KW => return Some(JoinType::Left),
+                RIGHT_KW => return Some(JoinType::Right),
+                FULL_KW => return Some(JoinType::Full),
+                CROSS_KW => return Some(JoinType::Cross),
+                _ => continue,
+            }
+        }
+        None // Bare JOIN, defaults to INNER
+    }
+
+    /// Get the table reference being joined
+    pub fn table_ref(&self) -> Option<TableRef> {
+        self.0.children().find_map(TableRef::cast)
+    }
+
+    /// Get the join condition (ON or USING clause)
+    pub fn condition(&self) -> Option<JoinCondition> {
+        self.0.children().find_map(JoinCondition::cast)
+    }
+}
+
+/// JOIN type enumeration
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JoinType {
+    Inner,
+    Left,
+    Right,
+    Full,
+    Cross,
+}
+
+/// JOIN condition (ON expr or USING cols)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct JoinCondition(SyntaxNode);
+
+impl JoinCondition {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == JOIN_CONDITION {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Check if this is an ON condition (vs USING)
+    pub fn is_on(&self) -> bool {
+        self.0.children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .any(|t| t.kind() == ON_KW)
+    }
+
+    /// Check if this is a USING condition
+    pub fn is_using(&self) -> bool {
+        self.0.children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .any(|t| t.kind() == USING_KW)
+    }
+
+    /// Get the ON expression (if this is an ON condition)
+    pub fn on_expression(&self) -> Option<Expr> {
+        if self.is_on() {
+            self.0.children().find_map(Expr::cast)
+        } else {
+            None
+        }
+    }
+
+    /// Get the USING column list as strings
+    pub fn using_columns(&self) -> Vec<String> {
+        if !self.is_using() {
+            return Vec::new();
+        }
+
+        self.0.children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .filter(|t| t.kind() == IDENT)
+            .map(|t| t.text().to_string())
+            .collect()
+    }
 }
 
 /// Table reference (identifier or template expression)

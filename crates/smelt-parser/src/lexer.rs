@@ -231,6 +231,15 @@ fn keyword_or_ident(text: &str) -> SyntaxKind {
         "AND" => AND_KW,
         "OR" => OR_KW,
         "NOT" => NOT_KW,
+        "JOIN" => JOIN_KW,
+        "INNER" => INNER_KW,
+        "LEFT" => LEFT_KW,
+        "RIGHT" => RIGHT_KW,
+        "FULL" => FULL_KW,
+        "OUTER" => OUTER_KW,
+        "CROSS" => CROSS_KW,
+        "ON" => ON_KW,
+        "USING" => USING_KW,
         _ => IDENT,
     }
 }

@@ -20,6 +20,13 @@ services:
       - RUST_BACKTRACE=1
       - CARGO_HOME=/workspace/.cargo-cache
     working_dir: /workspace
+    # Increase memory limits for Rust compilation
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
     # Keep container running
     stdin_open: true
     tty: true

@@ -13,6 +13,15 @@ pub enum SyntaxKind {
     AND_KW,
     OR_KW,
     NOT_KW,
+    JOIN_KW,
+    INNER_KW,
+    LEFT_KW,
+    RIGHT_KW,
+    FULL_KW,
+    OUTER_KW,
+    CROSS_KW,
+    ON_KW,
+    USING_KW,
 
     // Operators & punctuation
     LPAREN,   // (
@@ -46,6 +55,8 @@ pub enum SyntaxKind {
     SELECT_ITEM,     // column or expression with optional alias
     FROM_CLAUSE,     // FROM table or ref() function
     TABLE_REF,       // Table reference (identifier or function call)
+    JOIN_CLAUSE,     // Complete JOIN clause with type and condition
+    JOIN_CONDITION,  // ON expr or USING (cols)
     WHERE_CLAUSE,    // WHERE expression
     GROUP_BY_CLAUSE, // GROUP BY column1, column2
     EXPRESSION,      // Generic expression
@@ -68,6 +79,7 @@ impl SyntaxKind {
         matches!(
             self,
             SELECT_KW | FROM_KW | WHERE_KW | GROUP_KW | BY_KW | AS_KW | AND_KW | OR_KW | NOT_KW
+            | JOIN_KW | INNER_KW | LEFT_KW | RIGHT_KW | FULL_KW | OUTER_KW | CROSS_KW | ON_KW | USING_KW
         )
     }
 
