@@ -1,0 +1,27 @@
+name: smelt_examples
+version: 1
+
+model_paths:
+  - models
+
+targets:
+  dev:
+    type: duckdb
+    database: target/dev.duckdb
+    schema: main
+
+  spark:
+    type: spark
+    connect_url: sc://localhost:15002
+    catalog: spark_catalog
+    schema: main
+
+default_materialization: view
+
+models:
+  users:
+    materialization: table
+  events:
+    materialization: table
+  user_activity:
+    materialization: table
