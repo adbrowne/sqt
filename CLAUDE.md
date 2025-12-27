@@ -184,21 +184,18 @@ This separation allows the LSP to get incremental parsing via Salsa, while the o
 - **DuckDB**: Local execution engine for testing (bundled, no system install needed)
 - **Arrow**: Data interchange format between components
 
-### Example-Driven Development
+### SQL Model Examples
 
-The project uses concrete examples to discover the right optimizer API:
+The `examples/` directory contains SQL model examples demonstrating smelt capabilities:
 
-1. **Example 1** (`crates/smelt-examples/examples/`):
-   - **Naive version** (`example1_naive.rs`): Three models computing sessions independently
-   - **Optimized version** (`example1_optimized.rs`): Shared session computation
-   - **Goal**: Extract patterns for detecting common intermediate aggregations
-   - **Type**: Transparent optimization (preserves exact results)
-
-2. **Example 2** (`crates/smelt-examples/examples/`):
-   - **Naive version** (`example2_naive.rs`): Large multi-dimensional GROUP BY with massive shuffle
-   - **Optimized version** (`example2_optimized.rs`): Split into independent dimensional queries
-   - **Goal**: Demonstrate when optimizations require user consent (lossy transformation)
-   - **Type**: Semantic optimization (changes result structure, requires consent)
+- **daily_revenue.sql**: Demonstrates incremental materialization with daily partitions
+  - Aggregates transaction data by date and user
+  - Configured in smelt.yml for incremental updates
+  - Shows day-by-day processing with partition awareness
+- **transactions.sql**: Source model mapping raw transaction data
+- **user_activity.sql**: Derived model using smelt.ref() for cross-model dependencies
+- Configuration in smelt.yml with incremental settings
+- Source data setup with timestamps for testing incremental updates
 
 ### Crate Structure
 
@@ -209,9 +206,6 @@ The project uses concrete examples to discover the right optimizer API:
   - Parses SQL structure: SELECT, FROM, WHERE, GROUP BY, expressions, functions
   - Named parameters: Handles `param => value` syntax in function calls
   - Position tracking: Accurate line/column information for diagnostics and goto-definition
-- `smelt-examples`: Concrete optimization examples used to drive API design
-  - `src/utils.rs`: Shared utilities for DuckDB execution and pretty printing
-  - `examples/`: Runnable examples comparing naive vs optimized approaches
 - `smelt-db`: Salsa database with incremental queries (wraps smelt-parser for incremental compilation)
   - Input queries: `file_text()`, `all_files()`
   - Syntax queries: `parse_file()`, `parse_model()`, `model_refs()` (with positions)

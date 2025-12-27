@@ -40,3 +40,41 @@ INSERT INTO raw.events VALUES
     (8, 1, 'logout', '2025-01-10 12:00:00'),
     (9, 4, 'login', '2025-01-10 13:00:00'),
     (10, 2, 'purchase', '2025-01-10 14:00:00');
+
+-- Create and populate transactions table
+CREATE TABLE IF NOT EXISTS raw.transactions (
+    transaction_id INTEGER,
+    user_id INTEGER,
+    amount DECIMAL(10,2),
+    transaction_timestamp TIMESTAMP,
+    transaction_type VARCHAR
+);
+
+DELETE FROM raw.transactions;
+
+-- Insert sample data spanning 30 days
+INSERT INTO raw.transactions
+WITH dates AS (
+    SELECT TIMESTAMP '2024-01-01 00:00:00' + INTERVAL (d) DAY
+           + INTERVAL (CAST(RANDOM() * 24 AS INTEGER)) HOUR
+           + INTERVAL (CAST(RANDOM() * 60 AS INTEGER)) MINUTE AS ts
+    FROM UNNEST(RANGE(0, 30)) AS t(d)
+),
+users AS (
+    SELECT UNNEST(RANGE(1, 101)) AS user_id
+)
+SELECT
+    ROW_NUMBER() OVER () AS transaction_id,
+    user_id,
+    (RANDOM() * 100 + 10)::DECIMAL(10,2) AS amount,
+    ts AS transaction_timestamp,
+    CASE (RANDOM() * 4)::INTEGER
+        WHEN 0 THEN 'purchase'
+        WHEN 1 THEN 'refund'
+        WHEN 2 THEN 'subscription'
+        ELSE 'tip'
+    END AS transaction_type
+FROM dates
+CROSS JOIN users
+WHERE RANDOM() < 0.05  -- 5% sampling
+LIMIT 10000;

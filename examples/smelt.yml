@@ -25,3 +25,12 @@ models:
     materialization: table
   user_activity:
     materialization: table
+  transactions:
+    materialization: table
+  daily_revenue:
+    materialization: table
+    incremental:
+      enabled: true
+      partition_column: revenue_date
+      # For demo: process one day at a time
+      # In production: would use watermarks, lookback windows, etc.

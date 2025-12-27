@@ -41,7 +41,7 @@ smelt run --dry-run --verbose
 
 ## Current Status
 
-**Phases 1-3 Complete**: Parser, LSP, and CLI with DuckDB execution.
+**Phases 1-9 Complete**: Parser, LSP, CLI with multi-backend support (DuckDB + Spark stub), and basic incremental materialization.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for implementation status.
 

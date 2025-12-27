@@ -4,7 +4,7 @@ use anyhow::Context;
 use arrow::array::RecordBatch;
 use async_trait::async_trait;
 use duckdb::Connection;
-use smelt_backend::{Backend, BackendCapabilities, BackendError, SqlDialect};
+use smelt_backend::{Backend, BackendCapabilities, BackendError, PartitionSpec, SqlDialect};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 /// Uses Arc<Mutex<Connection>> since Connection is not Sync.
 pub struct DuckDbBackend {
     connection: Arc<Mutex<Connection>>,
+    #[allow(dead_code)] // Used in new() for schema creation
     schema: String,
 }
 
@@ -235,6 +236,61 @@ impl Backend for DuckDbBackend {
 
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities::duckdb()
+    }
+
+    async fn delete_partitions(
+        &self,
+        schema: &str,
+        name: &str,
+        partition: &PartitionSpec,
+    ) -> Result<(), BackendError> {
+        let table_name = format!("{}.{}", schema, name);
+
+        // Build WHERE clause: column IN ('value1', 'value2', ...)
+        let values_list = partition
+            .values
+            .iter()
+            .map(|v| format!("'{}'", v.replace("'", "''"))) // SQL escape
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let delete_sql = format!(
+            "DELETE FROM {} WHERE {} IN ({})",
+            table_name, partition.column, values_list
+        );
+
+        let connection = Arc::clone(&self.connection);
+
+        tokio::task::spawn_blocking(move || {
+            let conn = connection.lock().unwrap();
+            conn.execute(&delete_sql, []).map_err(|e| {
+                BackendError::execution_failed(table_name.clone(), e.to_string())
+            })?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| BackendError::Other(e.into()))?
+    }
+
+    async fn insert_into_from_query(
+        &self,
+        schema: &str,
+        name: &str,
+        sql: &str,
+    ) -> Result<(), BackendError> {
+        let table_name = format!("{}.{}", schema, name);
+        let insert_sql = format!("INSERT INTO {} {}", table_name, sql);
+        let connection = Arc::clone(&self.connection);
+
+        tokio::task::spawn_blocking(move || {
+            let conn = connection.lock().unwrap();
+            conn.execute(&insert_sql, []).map_err(|e| {
+                BackendError::execution_failed(table_name.clone(), e.to_string())
+            })?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| BackendError::Other(e.into()))?
     }
 }
 

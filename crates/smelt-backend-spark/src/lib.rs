@@ -16,7 +16,7 @@
 
 use arrow::array::RecordBatch;
 use async_trait::async_trait;
-use smelt_backend::{Backend, BackendCapabilities, BackendError, SqlDialect};
+use smelt_backend::{Backend, BackendCapabilities, BackendError, PartitionSpec, SqlDialect};
 
 /// Spark Connect backend for smelt (stub implementation).
 ///
@@ -177,6 +177,34 @@ impl Backend for SparkBackend {
 
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities::spark()
+    }
+
+    async fn delete_partitions(
+        &self,
+        schema: &str,
+        name: &str,
+        _partition: &PartitionSpec,
+    ) -> Result<(), BackendError> {
+        let table_name = self.qualified_name(schema, name);
+
+        Err(BackendError::Other(anyhow::anyhow!(
+            "Spark backend stub: would delete partitions from {}",
+            table_name
+        )))
+    }
+
+    async fn insert_into_from_query(
+        &self,
+        schema: &str,
+        name: &str,
+        _sql: &str,
+    ) -> Result<(), BackendError> {
+        let table_name = self.qualified_name(schema, name);
+
+        Err(BackendError::Other(anyhow::anyhow!(
+            "Spark backend stub: would insert into {}",
+            table_name
+        )))
     }
 }
 

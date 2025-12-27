@@ -9,7 +9,7 @@ mod types;
 
 pub use dialect::{BackendCapabilities, SqlDialect};
 pub use error::BackendError;
-pub use types::{ExecutionResult, Materialization};
+pub use types::{ExecutionResult, Materialization, MaterializationStrategy, PartitionSpec};
 
 use arrow::array::RecordBatch;
 use async_trait::async_trait;
@@ -103,4 +103,72 @@ pub trait Backend: Send + Sync {
             preview,
         })
     }
+
+    /// Execute a model with incremental materialization support.
+    ///
+    /// This extends execute_model() with partition-aware incremental updates.
+    async fn execute_model_incremental(
+        &self,
+        schema: &str,
+        name: &str,
+        sql: &str,
+        materialization: Materialization,
+        strategy: MaterializationStrategy,
+        show_preview: bool,
+    ) -> Result<ExecutionResult, BackendError> {
+        let start = std::time::Instant::now();
+
+        match (materialization, strategy) {
+            (Materialization::View, _) => {
+                self.drop_view_if_exists(schema, name).await?;
+                self.create_view_as(schema, name, sql).await?;
+            }
+            (Materialization::Table, MaterializationStrategy::FullRefresh) => {
+                self.drop_table_if_exists(schema, name).await?;
+                self.create_table_as(schema, name, sql).await?;
+            }
+            (Materialization::Table, MaterializationStrategy::Incremental { partition }) => {
+                let table_exists = self.table_exists(schema, name).await?;
+
+                if !table_exists {
+                    self.create_table_as(schema, name, sql).await?;
+                } else {
+                    self.delete_partitions(schema, name, &partition).await?;
+                    self.insert_into_from_query(schema, name, sql).await?;
+                }
+            }
+        }
+
+        let duration = start.elapsed();
+        let row_count = self.get_row_count(schema, name).await?;
+
+        let preview = if show_preview {
+            Some(self.get_preview(schema, name, 10).await?)
+        } else {
+            None
+        };
+
+        Ok(ExecutionResult {
+            model_name: name.to_string(),
+            duration,
+            row_count,
+            preview,
+        })
+    }
+
+    /// Delete rows matching partition values.
+    async fn delete_partitions(
+        &self,
+        schema: &str,
+        name: &str,
+        partition: &PartitionSpec,
+    ) -> Result<(), BackendError>;
+
+    /// Insert data from a SELECT query into an existing table.
+    async fn insert_into_from_query(
+        &self,
+        schema: &str,
+        name: &str,
+        sql: &str,
+    ) -> Result<(), BackendError>;
 }

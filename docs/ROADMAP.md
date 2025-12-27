@@ -4,7 +4,7 @@ This document tracks the implementation status of smelt, aligned with the spec i
 
 ## Current Status
 
-**Multi-Backend Architecture Complete**: Parser, LSP, and multi-backend CLI with DuckDB and Spark (stub) implementations.
+**Multi-Backend Architecture with Basic Incremental Materialization Complete**: Parser, LSP, multi-backend CLI with DuckDB and Spark (stub) implementations, and basic incremental materialization support.
 
 ```sql
 -- ✅ Supported syntax (parser & LSP)
@@ -349,7 +349,102 @@ All 12 parser tests passing, including:
 
 ---
 
-### Phase 9: Column Schema Tracking
+## ✅ Phase 9: Basic Incremental Materialization (COMPLETED)
+
+**Completed**: December 27, 2024
+
+### What Was Implemented
+
+- **Backend trait enhancements** for incremental updates
+  - `MaterializationStrategy` enum (FullRefresh | Incremental)
+  - `PartitionSpec` type (column + values for DELETE clause)
+  - `execute_model_incremental()` method with strategy parameter
+  - `delete_partitions()` and `insert_into_from_query()` primitives
+
+- **DuckDB backend** incremental support
+  - DELETE by partition using IN clause with SQL escaping
+  - INSERT INTO ... SELECT pattern
+  - Auto-creates table on first run (graceful degradation)
+  - Spark backend updated with stub implementations
+
+- **SQL model examples** demonstrating materialization strategies
+  - `examples/models/transactions.sql` - Source model with timestamped events
+  - `examples/models/daily_revenue.sql` - Daily aggregation using incremental materialization
+  - Configuration in `examples/smelt.yml` with incremental settings
+  - Source data setup with 30 days of transaction data (setup_sources.sql)
+  - sources.yml updated with transactions table schema
+
+- **Removed** `smelt-examples` Rust crate
+  - Not the right pattern for this project
+  - Replaced with SQL model examples in examples/ workspace
+
+### Implementation Details
+
+**New types** (`crates/smelt-backend/src/types.rs`):
+- `PartitionSpec { column: String, values: Vec<String> }` - Specifies which partitions to update
+- `MaterializationStrategy::FullRefresh` - DROP + CREATE (existing behavior)
+- `MaterializationStrategy::Incremental { partition }` - DELETE + INSERT by partition
+
+**Backend trait** (`crates/smelt-backend/src/lib.rs`):
+- `execute_model_incremental()` - Strategy-aware model execution with default implementation
+- `delete_partitions()` - DELETE WHERE column IN (values) - trait method, backends implement
+- `insert_into_from_query()` - INSERT INTO ... SELECT - trait method, backends implement
+
+**DuckDB backend** (`crates/smelt-backend-duckdb/src/lib.rs`):
+- Implements delete_partitions using IN clause with SQL escaping (single quote escape)
+- Implements insert_into_from_query using standard SQL
+- Auto-creates table on first run if it doesn't exist
+
+**SQL Examples** (`examples/`):
+- `models/daily_revenue.sql` - Aggregates transactions by date and user
+- `smelt.yml` - Configures incremental: { enabled: true, partition_column: revenue_date }
+- `sources.yml` - Defines transactions table schema
+- `setup_sources.sql` - Populates 30 days of sample transaction data
+
+### Design Decisions
+
+**DELETE+INSERT vs MERGE**:
+- Chose DELETE+INSERT for universal backend support
+- MERGE support varies (DuckDB: yes, Spark: Delta only, PostgreSQL: 15+ only)
+- DELETE+INSERT works everywhere and is easy to reason about
+
+**Partition specification**:
+- Simple string-based partition values (not typed)
+- Supports multiple partitions in one operation (IN clause)
+- Future: Could add partition expressions, range specifications
+
+**First run handling**:
+- Auto-creates table if it doesn't exist (check with table_exists)
+- Avoids separate schema management
+- Graceful degradation to full refresh on first run
+
+**Configuration in YAML, not SQL comments**:
+- Incremental settings in smelt.yml, not annotation parsing
+- Avoids need to implement annotation parser (Phase deferred indefinitely)
+- Still demonstrates the intent and validates the backend API
+
+### Future Work (Phase 10+)
+
+This is "basic" incremental materialization. Future enhancements:
+
+- **CLI integration** - Parse incremental config, determine partitions to process, call execute_model_incremental
+- **Auto-detection** - Infer when incremental is safe from SQL semantics
+- **Partition inference** - Extract partition column from WHERE clauses
+- **Watermark tracking** - Ensure exactly-once processing, handle late-arriving data
+- **Multi-column partitions** - Support composite partition keys
+- **MERGE support** - Use MERGE/UPSERT for backends that support it
+
+### Test Results
+
+- `cargo clippy --all-targets` passes with no warnings
+- Backend trait compiles successfully
+- DuckDB backend implements all new methods
+- Spark backend updated with stub implementations
+- SQL models parse correctly
+
+---
+
+### Phase 10: Column Schema Tracking
 
 **Value**: Enable smarter LSP features (autocomplete, validation)
 

@@ -50,3 +50,26 @@ impl std::str::FromStr for Materialization {
         }
     }
 }
+
+/// Partition specification for incremental updates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartitionSpec {
+    /// Column name used for partitioning (e.g., "date", "event_date")
+    pub column: String,
+
+    /// Partition values to update (e.g., vec!["2024-01-01", "2024-01-02"])
+    pub values: Vec<String>,
+}
+
+/// Materialization strategy for tables.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum MaterializationStrategy {
+    /// Full refresh: DROP + CREATE (existing behavior)
+    #[default]
+    FullRefresh,
+
+    /// Incremental: DELETE by partition + INSERT
+    Incremental {
+        partition: PartitionSpec,
+    },
+}
