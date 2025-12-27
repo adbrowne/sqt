@@ -59,6 +59,32 @@ impl SqlCompiler {
             materialization: self.config.get_materialization(&model.name),
         })
     }
+
+    /// Compile a model with custom SQL (e.g., for transformed queries).
+    /// This is used for incremental processing where the SQL has been transformed.
+    pub fn compile_with_sql(
+        &self,
+        model: &ModelFile,
+        schema: &str,
+        sql: &str,
+    ) -> Result<CompiledModel> {
+        // Replace refs in the provided SQL
+        let unique_refs: std::collections::HashSet<_> =
+            model.refs.iter().map(|r| r.model_name.as_str()).collect();
+
+        let mut compiled_sql = sql.to_string();
+        for ref_name in unique_refs {
+            let pattern = format!("smelt.ref('{}')", ref_name);
+            let replacement = format!("{}.{}", schema, ref_name);
+            compiled_sql = compiled_sql.replace(&pattern, &replacement);
+        }
+
+        Ok(CompiledModel {
+            name: model.name.clone(),
+            sql: compiled_sql,
+            materialization: self.config.get_materialization(&model.name),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -211,7 +237,8 @@ FROM smelt.ref('raw_events', filter => event_type = 'page_view')
         config.models.insert(
             "test_model".to_string(),
             ModelConfig {
-                materialization: Materialization::Table,
+                materialization: Some(Materialization::Table),
+                incremental: None,
             },
         );
 

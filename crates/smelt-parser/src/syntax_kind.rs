@@ -13,6 +13,8 @@ pub enum SyntaxKind {
     AND_KW,
     OR_KW,
     NOT_KW,
+    IS_KW,
+    NULL_KW,
     JOIN_KW,
     INNER_KW,
     LEFT_KW,
@@ -79,7 +81,8 @@ impl SyntaxKind {
         matches!(
             self,
             SELECT_KW | FROM_KW | WHERE_KW | GROUP_KW | BY_KW | AS_KW | AND_KW | OR_KW | NOT_KW
-            | JOIN_KW | INNER_KW | LEFT_KW | RIGHT_KW | FULL_KW | OUTER_KW | CROSS_KW | ON_KW | USING_KW
+            | IS_KW | NULL_KW | JOIN_KW | INNER_KW | LEFT_KW | RIGHT_KW | FULL_KW | OUTER_KW
+            | CROSS_KW | ON_KW | USING_KW
         )
     }
 

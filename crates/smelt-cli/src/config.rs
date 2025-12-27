@@ -94,7 +94,19 @@ pub enum BackendType {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModelConfig {
-    pub materialization: Materialization,
+    #[serde(default)]
+    pub materialization: Option<Materialization>,
+    #[serde(default)]
+    pub incremental: Option<IncrementalConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IncrementalConfig {
+    pub enabled: bool,
+    /// Column in source data to filter on (for WHERE injection)
+    pub event_time_column: String,
+    /// Column in output to delete by (for DELETE+INSERT)
+    pub partition_column: String,
 }
 
 impl Config {
@@ -119,8 +131,16 @@ impl Config {
     pub fn get_materialization(&self, model_name: &str) -> Materialization {
         self.models
             .get(model_name)
-            .map(|m| m.materialization.clone())
+            .and_then(|m| m.materialization.clone())
             .unwrap_or_else(|| self.default_materialization.clone())
+    }
+
+    /// Get incremental config for a model if enabled
+    pub fn get_incremental(&self, model_name: &str) -> Option<&IncrementalConfig> {
+        self.models
+            .get(model_name)
+            .and_then(|m| m.incremental.as_ref())
+            .filter(|i| i.enabled)
     }
 }
 
@@ -234,11 +254,11 @@ models:
         assert_eq!(config.name, "test_project");
         assert_eq!(
             config.models.get("model1").unwrap().materialization,
-            Materialization::Table
+            Some(Materialization::Table)
         );
         assert_eq!(
             config.models.get("model2").unwrap().materialization,
-            Materialization::View
+            Some(Materialization::View)
         );
     }
 

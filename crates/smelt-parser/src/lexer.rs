@@ -231,6 +231,8 @@ fn keyword_or_ident(text: &str) -> SyntaxKind {
         "AND" => AND_KW,
         "OR" => OR_KW,
         "NOT" => NOT_KW,
+        "IS" => IS_KW,
+        "NULL" => NULL_KW,
         "JOIN" => JOIN_KW,
         "INNER" => INNER_KW,
         "LEFT" => LEFT_KW,

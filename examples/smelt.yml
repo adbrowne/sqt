@@ -31,6 +31,7 @@ models:
     materialization: table
     incremental:
       enabled: true
-      partition_column: revenue_date
+      event_time_column: transaction_timestamp  # Column in SOURCE data (for WHERE filter)
+      partition_column: revenue_date             # Column in OUTPUT (for DELETE)
       # For demo: process one day at a time
       # In production: would use watermarks, lookback windows, etc.

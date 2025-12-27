@@ -148,6 +148,16 @@ impl FromClause {
     pub fn joins(&self) -> impl Iterator<Item = JoinClause> + '_ {
         self.0.children().filter_map(JoinClause::cast)
     }
+
+    /// Get the text range of this FROM clause
+    pub fn text_range(&self) -> TextRange {
+        self.0.text_range()
+    }
+
+    /// Get the full text of this FROM clause
+    pub fn text(&self) -> String {
+        self.0.text().to_string()
+    }
 }
 
 /// JOIN clause (JOIN type + table + condition)
@@ -293,6 +303,16 @@ impl WhereClause {
         } else {
             None
         }
+    }
+
+    /// Get the text range of this WHERE clause
+    pub fn text_range(&self) -> TextRange {
+        self.0.text_range()
+    }
+
+    /// Get the full text of this WHERE clause
+    pub fn text(&self) -> String {
+        self.0.text().to_string()
     }
 }
 

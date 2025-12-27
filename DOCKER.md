@@ -94,11 +94,15 @@ Changes you make in the container are immediately reflected on the host and vice
 
 ### Build Artifact Caching
 
-Build artifacts are stored in Docker volumes for performance:
-- `target/` - Rust build artifacts
-- `editors/vscode/node_modules/` - Node.js dependencies
+Build artifacts are stored in named Docker volumes for performance and to avoid cross-platform compilation issues:
+- `cargo-target` → `/workspace/target` - Rust build artifacts
+- `cargo-cache` → `/workspace/.cargo-cache` - Cargo registry and git checkouts
+- `node-modules` → `/workspace/editors/vscode/node_modules` - Node.js dependencies
 
-This prevents conflicts between host and container builds and improves performance.
+Using named volumes (instead of bind mounts to the host) is essential because:
+1. **Cross-platform compatibility**: Rust binaries compiled in Linux won't work on macOS and vice versa
+2. **Performance**: Docker volumes are faster than bind mounts, especially on macOS
+3. **Linker compatibility**: The linker can run out of memory when writing to a bind-mounted host filesystem
 
 ### Settings Persistence
 
@@ -207,7 +211,7 @@ docker-compose down -v
 To remove only build caches while preserving settings:
 ```bash
 docker-compose down
-docker volume rm smelt_target smelt_node_modules
+docker volume rm smelt_cargo-target smelt_cargo-cache smelt_node-modules
 docker-compose up -d
 ```
 

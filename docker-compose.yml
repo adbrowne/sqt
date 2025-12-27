@@ -7,9 +7,10 @@ services:
     volumes:
       # Mount source code
       - .:/workspace
-      # Exclude build artifacts (use named volumes for better performance)
-      - /workspace/target
-      - /workspace/editors/vscode/node_modules
+      # Use named volumes for build artifacts (avoids cross-platform issues with macOS host)
+      - cargo-target:/workspace/target
+      - cargo-cache:/workspace/.cargo-cache
+      - node-modules:/workspace/editors/vscode/node_modules
       # Mount host's git config for user identity
       - ${HOME}/.gitconfig:/root/.gitconfig.host:ro
       # Mount Docker git config that includes host config and adds push protection
@@ -21,12 +22,8 @@ services:
       - CARGO_HOME=/workspace/.cargo-cache
     working_dir: /workspace
     # Increase memory limits for Rust compilation
-    deploy:
-      resources:
-        limits:
-          memory: 8G
-        reservations:
-          memory: 4G
+    mem_limit: 8g
+    memswap_limit: 8g
     # Keep container running
     stdin_open: true
     tty: true
@@ -42,5 +39,11 @@ services:
 #     internal: true
 
 volumes:
+  cargo-target:
+    driver: local
+  cargo-cache:
+    driver: local
+  node-modules:
+    driver: local
   claude-settings:
     driver: local

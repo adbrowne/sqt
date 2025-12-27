@@ -2,7 +2,7 @@ use crate::compiler::CompiledModel;
 use crate::config::SourceConfig;
 use crate::errors::CliError;
 use anyhow::Result;
-use smelt_backend::{Backend, ExecutionResult, Materialization};
+use smelt_backend::{Backend, ExecutionResult, Materialization, MaterializationStrategy, PartitionSpec};
 
 /// Execute a compiled model using any Backend implementation.
 pub async fn execute_model(
@@ -19,6 +19,50 @@ pub async fn execute_model(
 
     backend
         .execute_model(schema, &compiled.name, &compiled.sql, materialization, show_results)
+        .await
+        .map_err(|e| {
+            CliError::ExecutionError {
+                model: compiled.name.clone(),
+                sql: compiled.sql.clone(),
+                source: e.into(),
+            }
+            .into()
+        })
+}
+
+/// Execute a compiled model incrementally using DELETE+INSERT pattern.
+///
+/// This function:
+/// 1. Deletes existing rows for the specified partitions
+/// 2. Inserts new rows from the (filtered) SQL query
+/// 3. Auto-creates the table on first run if it doesn't exist
+pub async fn execute_model_incremental(
+    backend: &dyn Backend,
+    compiled: &CompiledModel,
+    schema: &str,
+    partition: PartitionSpec,
+    show_results: bool,
+) -> Result<ExecutionResult> {
+    // Views can't be incremental - warn and use full refresh
+    if matches!(compiled.materialization, crate::config::Materialization::View) {
+        eprintln!(
+            "  Warning: {} is a view, using full refresh (views cannot be incremental)",
+            compiled.name
+        );
+        return execute_model(backend, compiled, schema, show_results).await;
+    }
+
+    let strategy = MaterializationStrategy::Incremental { partition };
+
+    backend
+        .execute_model_incremental(
+            schema,
+            &compiled.name,
+            &compiled.sql,
+            Materialization::Table,
+            strategy,
+            show_results,
+        )
         .await
         .map_err(|e| {
             CliError::ExecutionError {

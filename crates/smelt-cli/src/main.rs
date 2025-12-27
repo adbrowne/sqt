@@ -1,11 +1,12 @@
 use anyhow::{Context, Result};
 use arrow::util::pretty;
+use chrono::{Duration, NaiveDate};
 use clap::{Parser, Subcommand};
-use smelt_backend::Backend;
+use smelt_backend::{Backend, PartitionSpec};
 use smelt_backend_duckdb::DuckDbBackend;
 use smelt_cli::{
-    executor, find_project_root, BackendType, Config, DependencyGraph, ModelDiscovery,
-    SourceConfig, SqlCompiler,
+    executor, find_project_root, inject_time_filter, BackendType, Config, DependencyGraph,
+    ModelDiscovery, SourceConfig, SqlCompiler, TimeRange,
 };
 use std::path::PathBuf;
 
@@ -51,6 +52,14 @@ struct RunArgs {
     /// Parse and validate without executing
     #[arg(long)]
     dry_run: bool,
+
+    /// Start of event time range for incremental models (ISO 8601: YYYY-MM-DD)
+    #[arg(long = "event-time-start", requires = "event_time_end")]
+    event_time_start: Option<String>,
+
+    /// End of event time range for incremental models (exclusive, ISO 8601: YYYY-MM-DD)
+    #[arg(long = "event-time-end", requires = "event_time_start")]
+    event_time_end: Option<String>,
 }
 
 #[tokio::main]
@@ -200,7 +209,25 @@ async fn run(args: RunArgs) -> Result<()> {
             .with_context(|| "Source validation failed")?;
     }
 
-    // 8. Compile and execute each model
+    // 8. Parse time range if provided (for incremental processing)
+    let time_range = match (&args.event_time_start, &args.event_time_end) {
+        (Some(start), Some(end)) => {
+            // Validate date format
+            NaiveDate::parse_from_str(start, "%Y-%m-%d")
+                .with_context(|| format!("Invalid start date format: {}. Expected YYYY-MM-DD", start))?;
+            NaiveDate::parse_from_str(end, "%Y-%m-%d")
+                .with_context(|| format!("Invalid end date format: {}. Expected YYYY-MM-DD", end))?;
+
+            println!("\nTime range: {} to {} (exclusive)", start, end);
+            Some(TimeRange {
+                start: start.clone(),
+                end: end.clone(),
+            })
+        }
+        _ => None,
+    };
+
+    // 9. Compile and execute each model
     let compiler = SqlCompiler::new(config.clone());
 
     println!("\n{}", "=".repeat(60));
@@ -212,41 +239,130 @@ async fn run(args: RunArgs) -> Result<()> {
     for model_name in &execution_order {
         let model = graph.get_model(model_name)?;
 
-        println!("\n▶ Running model: {}", model_name);
+        // Check if this model should be run incrementally
+        let inc_config = config.get_incremental(model_name);
+        let is_incremental = time_range.is_some() && inc_config.is_some();
 
-        // Compile
-        let compiled = compiler
-            .compile(model, &target_config.schema)
-            .with_context(|| format!("Failed to compile model: {}", model_name))?;
+        if is_incremental {
+            let range = time_range.as_ref().unwrap();
+            let inc = inc_config.unwrap();
 
-        if args.verbose {
-            println!("\n  Compiled SQL:");
-            println!("  {}", "─".repeat(58));
-            for line in compiled.sql.lines() {
-                println!("  {}", line);
+            println!("\n▶ Running model: {} (incremental)", model_name);
+
+            // Transform SQL to filter by time range
+            let transformed_sql = inject_time_filter(&model.content, &inc.event_time_column, range)
+                .with_context(|| format!("Failed to transform SQL for model: {}", model_name))?;
+
+            // Compile with transformed SQL
+            let compiled = compiler
+                .compile_with_sql(model, &target_config.schema, &transformed_sql)
+                .with_context(|| format!("Failed to compile model: {}", model_name))?;
+
+            if args.verbose {
+                println!("\n  Transformed SQL:");
+                println!("  {}", "─".repeat(58));
+                for line in compiled.sql.lines() {
+                    println!("  {}", line);
+                }
+                println!("  {}", "─".repeat(58));
             }
-            println!("  {}", "─".repeat(58));
-        }
 
-        // Execute
-        let result = executor::execute_model(backend.as_ref(), &compiled, &target_config.schema, args.show_results)
+            // Generate partition values for DELETE
+            let partition_values = generate_partition_dates(&range.start, &range.end)?;
+            println!(
+                "  Partitions to update: {} ({} days)",
+                if partition_values.len() <= 3 {
+                    partition_values.join(", ")
+                } else {
+                    format!(
+                        "{}, ..., {}",
+                        partition_values.first().unwrap(),
+                        partition_values.last().unwrap()
+                    )
+                },
+                partition_values.len()
+            );
+
+            let partition = PartitionSpec {
+                column: inc.partition_column.clone(),
+                values: partition_values,
+            };
+
+            // Execute incrementally
+            let result = executor::execute_model_incremental(
+                backend.as_ref(),
+                &compiled,
+                &target_config.schema,
+                partition,
+                args.show_results,
+            )
             .await
             .with_context(|| format!("Failed to execute model: {}", model_name))?;
 
-        println!(
-            "  ✓ {} ({} rows, {:?})",
-            result.model_name, result.row_count, result.duration
-        );
+            println!(
+                "  ✓ {} ({} rows, {:?})",
+                result.model_name, result.row_count, result.duration
+            );
 
-        // Show preview if requested
-        if let Some(ref batches) = result.preview {
-            println!("\n  Preview:");
-            pretty::print_batches(batches)
-                .with_context(|| "Failed to print result preview")?;
-            println!();
+            // Show preview if requested
+            if let Some(ref batches) = result.preview {
+                println!("\n  Preview:");
+                pretty::print_batches(batches)
+                    .with_context(|| "Failed to print result preview")?;
+                println!();
+            }
+
+            results.push(result);
+        } else {
+            // Standard full refresh path
+            if time_range.is_some() && inc_config.is_none() {
+                println!(
+                    "\n▶ Running model: {} (full refresh - not configured for incremental)",
+                    model_name
+                );
+            } else {
+                println!("\n▶ Running model: {}", model_name);
+            }
+
+            // Compile
+            let compiled = compiler
+                .compile(model, &target_config.schema)
+                .with_context(|| format!("Failed to compile model: {}", model_name))?;
+
+            if args.verbose {
+                println!("\n  Compiled SQL:");
+                println!("  {}", "─".repeat(58));
+                for line in compiled.sql.lines() {
+                    println!("  {}", line);
+                }
+                println!("  {}", "─".repeat(58));
+            }
+
+            // Execute
+            let result = executor::execute_model(
+                backend.as_ref(),
+                &compiled,
+                &target_config.schema,
+                args.show_results,
+            )
+            .await
+            .with_context(|| format!("Failed to execute model: {}", model_name))?;
+
+            println!(
+                "  ✓ {} ({} rows, {:?})",
+                result.model_name, result.row_count, result.duration
+            );
+
+            // Show preview if requested
+            if let Some(ref batches) = result.preview {
+                println!("\n  Preview:");
+                pretty::print_batches(batches)
+                    .with_context(|| "Failed to print result preview")?;
+                println!();
+            }
+
+            results.push(result);
         }
-
-        results.push(result);
     }
 
     // 9. Summary
@@ -259,4 +375,30 @@ async fn run(args: RunArgs) -> Result<()> {
     println!("  Total time: {:?}", total_duration);
 
     Ok(())
+}
+
+/// Generate partition date values from a time range.
+/// Returns a list of date strings in YYYY-MM-DD format.
+fn generate_partition_dates(start: &str, end: &str) -> Result<Vec<String>> {
+    let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d")
+        .with_context(|| format!("Invalid start date: {}", start))?;
+    let end_date = NaiveDate::parse_from_str(end, "%Y-%m-%d")
+        .with_context(|| format!("Invalid end date: {}", end))?;
+
+    if start_date >= end_date {
+        return Err(anyhow::anyhow!(
+            "Start date ({}) must be before end date ({})",
+            start,
+            end
+        ));
+    }
+
+    let mut dates = Vec::new();
+    let mut current = start_date;
+    while current < end_date {
+        dates.push(current.format("%Y-%m-%d").to_string());
+        current += Duration::days(1);
+    }
+
+    Ok(dates)
 }

@@ -508,12 +508,30 @@ impl<'a> Parser<'a> {
     fn parse_comparison_expr(&mut self) {
         self.parse_additive_expr();
 
-        while self.at_any(&[EQ, NE, LT, GT, LE, GE]) {
-            self.start_node(BINARY_EXPR);
-            self.advance();
+        loop {
             self.skip_trivia();
-            self.parse_additive_expr();
-            self.finish_node();
+            if self.at_any(&[EQ, NE, LT, GT, LE, GE]) {
+                self.start_node(BINARY_EXPR);
+                self.advance();
+                self.skip_trivia();
+                self.parse_additive_expr();
+                self.finish_node();
+            } else if self.at(IS_KW) {
+                // IS [NOT] NULL
+                self.start_node(BINARY_EXPR);
+                self.advance(); // consume IS
+                self.skip_trivia();
+                if self.at(NOT_KW) {
+                    self.advance(); // consume NOT
+                    self.skip_trivia();
+                }
+                if self.at(NULL_KW) {
+                    self.advance(); // consume NULL
+                }
+                self.finish_node();
+            } else {
+                break;
+            }
         }
     }
 
