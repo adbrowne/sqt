@@ -87,7 +87,7 @@ docker-compose down
 
 The docker-compose.yml mounts your source code into the container:
 
-- Host: `/Users/andrewbrowne/code/smelt`
+- Host: `<project directory>` (wherever you cloned the repo)
 - Container: `/workspace`
 
 Changes you make in the container are immediately reflected on the host and vice versa.

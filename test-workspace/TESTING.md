@@ -19,7 +19,7 @@ This launches a separate VSCode window with the extension loaded.
 **Steps:**
 1. Open the extension source in VSCode:
    ```bash
-   code /Users/andrewbrowne/code/sqt/editors/vscode
+   code editors/vscode
    ```
 
 2. Press **F5** to launch the Extension Development Host
@@ -28,8 +28,8 @@ This launches a separate VSCode window with the extension loaded.
 
 3. In the Extension Development Host window, open the test workspace:
    - File → Open Folder
-   - Select: `/Users/andrewbrowne/code/sqt/test-workspace`
-   - Or use CLI: `code /Users/andrewbrowne/code/sqt/test-workspace`
+   - Select: `test-workspace`
+   - Or use CLI: `code test-workspace`
 
 4. Wait for the extension to activate (check Output panel for "sqt Language Server")
 
@@ -42,7 +42,7 @@ Open the test workspace directly (requires extension to be installed).
 **Steps:**
 1. Open the test workspace in VSCode:
    ```bash
-   code /Users/andrewbrowne/code/sqt/test-workspace/test-workspace.code-workspace
+   code test-workspace/test-workspace.code-workspace
    ```
 
 2. The extension should auto-activate when it detects `models/*.sql`

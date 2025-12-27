@@ -9,7 +9,7 @@ This directory is dedicated to **planning, design documentation, and architectur
 ## Important Constraints
 
 **DO NOT access code outside this directory** - The only exception is:
-- `/Users/andrewbrowne/code/smelt/README.md` - The main project specification
+- `../README.md` - The main project specification
 
 **DO NOT make code changes** - This session is for documentation only:
 - NO reading parser, CLI, or LSP source code
