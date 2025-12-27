@@ -1,13 +1,38 @@
 use crate::config::{Config, Materialization};
 use crate::discovery::ModelFile;
 use crate::errors::{extract_snippet, text_range_to_line_col, CliError};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use rowan::TextRange;
 
 #[derive(Debug, Clone)]
 pub struct CompiledModel {
     pub name: String,
     pub sql: String,
     pub materialization: Materialization,
+}
+
+/// Replace smelt.ref() calls with qualified table names using AST-based ranges.
+///
+/// This function performs byte-exact replacements using TextRange positions from the parser.
+/// Refs are processed from end to start to avoid offset shifting.
+fn replace_refs_with_ranges(
+    sql: &str,
+    refs: &[(String, TextRange)], // (model_name, range)
+    schema: &str,
+) -> String {
+    // Sort by position (descending) to avoid offset shifting
+    let mut sorted: Vec<_> = refs.iter().collect();
+    sorted.sort_by(|a, b| b.1.start().cmp(&a.1.start()));
+
+    let mut result = sql.to_string();
+    for (model_name, range) in sorted {
+        let start = usize::from(range.start());
+        let end = usize::from(range.end());
+        let replacement = format!("{}.{}", schema, model_name);
+        result.replace_range(start..end, &replacement);
+    }
+
+    result
 }
 
 pub struct SqlCompiler {
@@ -38,20 +63,15 @@ impl SqlCompiler {
             }
         }
 
-        // Replace refs - we'll do simple string replacement for now
-        // For a production implementation, we'd want AST-based rewriting
-        let mut compiled_sql = model.content.clone();
+        // Prepare refs for AST-based replacement
+        let refs: Vec<(String, TextRange)> = model
+            .refs
+            .iter()
+            .map(|r| (r.model_name.clone(), r.range))
+            .collect();
 
-        // Collect all unique refs for replacement
-        let unique_refs: std::collections::HashSet<_> =
-            model.refs.iter().map(|r| r.model_name.as_str()).collect();
-
-        // Replace each ref pattern
-        for ref_name in unique_refs {
-            let pattern = format!("smelt.ref('{}')", ref_name);
-            let replacement = format!("{}.{}", schema, ref_name);
-            compiled_sql = compiled_sql.replace(&pattern, &replacement);
-        }
+        // Use AST-based replacement with precise byte offsets
+        let compiled_sql = replace_refs_with_ranges(&model.content, &refs, schema);
 
         Ok(CompiledModel {
             name: model.name.clone(),
@@ -68,16 +88,24 @@ impl SqlCompiler {
         schema: &str,
         sql: &str,
     ) -> Result<CompiledModel> {
-        // Replace refs in the provided SQL
-        let unique_refs: std::collections::HashSet<_> =
-            model.refs.iter().map(|r| r.model_name.as_str()).collect();
+        // Reparse transformed SQL to get accurate ref positions
+        // (byte offsets change after inject_time_filter transforms the SQL)
+        let parse = smelt_parser::parse(sql);
+        let file = smelt_parser::File::cast(parse.syntax())
+            .ok_or_else(|| anyhow!("Failed to parse transformed SQL"))?;
 
-        let mut compiled_sql = sql.to_string();
-        for ref_name in unique_refs {
-            let pattern = format!("smelt.ref('{}')", ref_name);
-            let replacement = format!("{}.{}", schema, ref_name);
-            compiled_sql = compiled_sql.replace(&pattern, &replacement);
-        }
+        // Extract refs with their ranges from transformed SQL
+        let refs: Vec<(String, TextRange)> = file
+            .refs()
+            .filter_map(|ref_call| {
+                let name = ref_call.model_name()?;
+                let range = ref_call.range();
+                Some((name, range))
+            })
+            .collect();
+
+        // Use AST-based replacement with precise byte offsets
+        let compiled_sql = replace_refs_with_ranges(sql, &refs, schema);
 
         Ok(CompiledModel {
             name: model.name.clone(),
@@ -91,7 +119,26 @@ impl SqlCompiler {
 mod tests {
     use super::*;
     use crate::config::{ModelConfig, Target};
+    use crate::discovery::RefInfo;
     use std::collections::HashMap;
+
+    /// Helper function to parse SQL and extract refs with real TextRange values
+    fn extract_refs_from_sql(sql: &str) -> Vec<RefInfo> {
+        let parse = smelt_parser::parse(sql);
+        if let Some(file) = smelt_parser::File::cast(parse.syntax()) {
+            file.refs()
+                .filter_map(|ref_call| {
+                    Some(RefInfo {
+                        model_name: ref_call.model_name()?,
+                        has_named_params: ref_call.named_params().count() > 0,
+                        range: ref_call.range(),
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
 
     fn make_test_config() -> Config {
         let mut targets = HashMap::new();
@@ -118,9 +165,6 @@ mod tests {
 
     #[test]
     fn test_simple_ref_replacement() {
-        use crate::discovery::RefInfo;
-        use rowan::TextRange;
-
         let sql = r#"
 SELECT
     user_id,
@@ -133,11 +177,7 @@ GROUP BY user_id
             name: "user_stats".to_string(),
             path: "models/user_stats.sql".into(),
             content: sql.to_string(),
-            refs: vec![RefInfo {
-                model_name: "raw_events".to_string(),
-                has_named_params: false,
-                range: TextRange::default(),
-            }],
+            refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
         };
 
@@ -152,9 +192,6 @@ GROUP BY user_id
 
     #[test]
     fn test_multiple_refs() {
-        use crate::discovery::RefInfo;
-        use rowan::TextRange;
-
         let sql = r#"
 SELECT a.user_id, b.session_id
 FROM smelt.ref('model_a') a
@@ -165,18 +202,7 @@ JOIN smelt.ref('model_b') b ON a.id = b.id
             name: "combined".to_string(),
             path: "models/combined.sql".into(),
             content: sql.to_string(),
-            refs: vec![
-                RefInfo {
-                    model_name: "model_a".to_string(),
-                    has_named_params: false,
-                    range: TextRange::default(),
-                },
-                RefInfo {
-                    model_name: "model_b".to_string(),
-                    has_named_params: false,
-                    range: TextRange::default(),
-                },
-            ],
+            refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
         };
 
@@ -192,9 +218,6 @@ JOIN smelt.ref('model_b') b ON a.id = b.id
 
     #[test]
     fn test_named_params_error() {
-        use crate::discovery::RefInfo;
-        use rowan::TextRange;
-
         let sql = r#"
 SELECT user_id
 FROM smelt.ref('raw_events', filter => event_type = 'page_view')
@@ -204,11 +227,7 @@ FROM smelt.ref('raw_events', filter => event_type = 'page_view')
             name: "filtered".to_string(),
             path: "models/filtered.sql".into(),
             content: sql.to_string(),
-            refs: vec![RefInfo {
-                model_name: "raw_events".to_string(),
-                has_named_params: true,
-                range: TextRange::new(0u32.into(), 10u32.into()),
-            }],
+            refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
         };
 
@@ -249,5 +268,103 @@ FROM smelt.ref('raw_events', filter => event_type = 'page_view')
             compiled.materialization,
             Materialization::Table
         ));
+    }
+
+    #[test]
+    fn test_ref_with_double_quotes() {
+        let sql = r#"SELECT * FROM smelt.ref("model_a")"#;
+
+        let model = ModelFile {
+            name: "test".to_string(),
+            path: "models/test.sql".into(),
+            content: sql.to_string(),
+            refs: extract_refs_from_sql(sql),
+            parse_errors: Vec::new(),
+        };
+
+        let config = make_test_config();
+        let compiler = SqlCompiler::new(config);
+
+        let compiled = compiler.compile(&model, "main").unwrap();
+
+        assert!(compiled.sql.contains("FROM main.model_a"));
+        assert!(!compiled.sql.contains("smelt.ref"));
+    }
+
+    #[test]
+    fn test_ref_with_whitespace() {
+        let sql = r#"SELECT * FROM smelt.ref( 'model_a' )"#;
+
+        let model = ModelFile {
+            name: "test".to_string(),
+            path: "models/test.sql".into(),
+            content: sql.to_string(),
+            refs: extract_refs_from_sql(sql),
+            parse_errors: Vec::new(),
+        };
+
+        let config = make_test_config();
+        let compiler = SqlCompiler::new(config);
+
+        let compiled = compiler.compile(&model, "main").unwrap();
+
+        assert!(compiled.sql.contains("FROM main.model_a"));
+        assert!(!compiled.sql.contains("smelt.ref"));
+    }
+
+    #[test]
+    fn test_multiple_refs_same_model() {
+        let sql = r#"
+SELECT a.id, b.id
+FROM smelt.ref('model_a') a
+JOIN smelt.ref('model_a') b ON a.parent_id = b.id
+"#;
+
+        let model = ModelFile {
+            name: "test".to_string(),
+            path: "models/test.sql".into(),
+            content: sql.to_string(),
+            refs: extract_refs_from_sql(sql),
+            parse_errors: Vec::new(),
+        };
+
+        let config = make_test_config();
+        let compiler = SqlCompiler::new(config);
+
+        let compiled = compiler.compile(&model, "main").unwrap();
+
+        // Both instances should be replaced
+        assert_eq!(compiled.sql.matches("main.model_a").count(), 2);
+        assert!(!compiled.sql.contains("smelt.ref"));
+    }
+
+    #[test]
+    fn test_refs_preserve_formatting() {
+        let sql = r#"
+SELECT
+    user_id,
+    COUNT(*) as count
+FROM smelt.ref('events')
+WHERE event_type = 'click'
+"#;
+
+        let model = ModelFile {
+            name: "test".to_string(),
+            path: "models/test.sql".into(),
+            content: sql.to_string(),
+            refs: extract_refs_from_sql(sql),
+            parse_errors: Vec::new(),
+        };
+
+        let config = make_test_config();
+        let compiler = SqlCompiler::new(config);
+
+        let compiled = compiler.compile(&model, "main").unwrap();
+
+        // Verify formatting is preserved (newlines, indentation)
+        assert!(compiled.sql.contains("SELECT\n    user_id,"));
+        assert!(compiled.sql.contains("FROM main.events"));
+        assert!(compiled.sql.contains("WHERE event_type = 'click'"));
+        assert!(!compiled.sql.contains("smelt.ref"));
     }
 }

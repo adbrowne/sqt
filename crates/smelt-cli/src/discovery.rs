@@ -161,9 +161,8 @@ FROM smelt.ref('raw_events', filter => event_type = 'page_view')
 SELECT
     a.user_id,
     b.session_id
-FROM smelt.ref('model_a') a,
-     smelt.ref('model_b') b
-WHERE a.id = b.id
+FROM smelt.ref('model_a') a
+INNER JOIN smelt.ref('model_b') b ON a.id = b.id
 "#;
 
         let parse = smelt_parser::parse(sql);
