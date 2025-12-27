@@ -100,6 +100,23 @@ Build artifacts are stored in Docker volumes for performance:
 
 This prevents conflicts between host and container builds and improves performance.
 
+### Settings Persistence
+
+Claude Code settings are persisted across container restarts using a named Docker volume:
+- `claude-settings:/root/.claude` - Claude Code configuration and preferences
+
+This means:
+- Your Claude Code settings are maintained between `docker-compose down` and `docker-compose up`
+- Settings persist even when rebuilding the container
+- You don't need to reconfigure Claude Code after each restart
+
+**To reset Claude Code settings:**
+```bash
+docker-compose down
+docker volume rm smelt_claude-settings
+docker-compose up -d
+```
+
 ### Git Configuration
 
 The container uses a restricted git configuration (`docker/gitconfig`) that:
@@ -183,7 +200,16 @@ To free up space by removing build artifact caches:
 docker-compose down -v
 ```
 
-**Warning**: This will delete cached Rust and Node.js builds, requiring a full rebuild next time.
+**Warning**: This will delete:
+- Cached Rust and Node.js builds (requiring a full rebuild next time)
+- Claude Code settings (requiring reconfiguration next time)
+
+To remove only build caches while preserving settings:
+```bash
+docker-compose down
+docker volume rm smelt_target smelt_node_modules
+docker-compose up -d
+```
 
 ### Customizing the Environment
 

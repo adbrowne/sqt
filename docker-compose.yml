@@ -10,8 +10,12 @@ services:
       # Exclude build artifacts (use named volumes for better performance)
       - /workspace/target
       - /workspace/editors/vscode/node_modules
-      # Mount a restricted git config that prevents pushing
+      # Mount host's git config for user identity
+      - ${HOME}/.gitconfig:/root/.gitconfig.host:ro
+      # Mount Docker git config that includes host config and adds push protection
       - ./docker/gitconfig:/root/.gitconfig:ro
+      # Persist Claude Code settings across container restarts
+      - claude-settings:/root/.claude
     environment:
       - RUST_BACKTRACE=1
       - CARGO_HOME=/workspace/.cargo-cache
@@ -29,3 +33,7 @@ services:
 #   isolated:
 #     driver: bridge
 #     internal: true
+
+volumes:
+  claude-settings:
+    driver: local

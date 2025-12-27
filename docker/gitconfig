@@ -1,6 +1,6 @@
-[user]
-	name = Claude Code (Docker)
-	email = claude@docker.local
+# Include host git config for user identity
+[include]
+	path = /root/.gitconfig.host
 
 [core]
 	editor = vi
