@@ -378,6 +378,13 @@ All 12 parser tests passing, including:
   - Not the right pattern for this project
   - Replaced with SQL model examples in examples/ workspace
 
+- **CLI integration** for incremental execution
+  - CLI flags: `--event-time-start` and `--event-time-end` for time range specification
+  - Time range parsing and validation (ISO 8601 YYYY-MM-DD format)
+  - SQL transformation via `inject_time_filter()` to add WHERE clause filtering
+  - Partition date generation from time ranges
+  - End-to-end orchestration in `main.rs` (incremental vs full refresh path)
+
 ### Implementation Details
 
 **New types** (`crates/smelt-backend/src/types.rs`):
@@ -400,6 +407,22 @@ All 12 parser tests passing, including:
 - `smelt.yml` - Configures incremental: { enabled: true, partition_column: revenue_date }
 - `sources.yml` - Defines transactions table schema
 - `setup_sources.sql` - Populates 30 days of sample transaction data
+
+**CLI Integration** (`crates/smelt-cli/src/`):
+- `main.rs` - Orchestrates incremental vs full refresh execution
+  - Parses `--event-time-start` and `--event-time-end` CLI arguments
+  - Loads incremental config from `smelt.yml` per model
+  - Determines execution strategy (incremental if both config + time range present)
+  - Calls `inject_time_filter()` to transform SQL with WHERE clause
+  - Generates partition dates using `generate_partition_dates()`
+  - Invokes `executor::execute_model_incremental()` with partition spec
+- `transformer.rs` - AST-based SQL transformation
+  - `inject_time_filter()` adds time range WHERE clause to source queries
+  - Uses Rowan parser for precise text replacement
+  - Preserves existing WHERE clauses (appends with AND)
+- `config.rs` - Incremental configuration types
+  - `IncrementalConfig` with `event_time_column` and `partition_column`
+  - `Config::get_incremental()` method for per-model settings
 
 ### Design Decisions
 
@@ -425,14 +448,14 @@ All 12 parser tests passing, including:
 
 ### Future Work (Phase 10+)
 
-This is "basic" incremental materialization. Future enhancements:
+Phase 9 includes complete end-to-end incremental materialization with CLI integration. Future enhancements could include:
 
-- **CLI integration** - Parse incremental config, determine partitions to process, call execute_model_incremental
+- **Watermark tracking** - Automatically track last processed timestamp and resume from watermark, eliminating need to manually specify time ranges each run
+- **Non-date partition support** - Support hourly timestamps, string categories, integer ranges (currently limited to daily date partitions)
 - **Auto-detection** - Infer when incremental is safe from SQL semantics
-- **Partition inference** - Extract partition column from WHERE clauses
-- **Watermark tracking** - Ensure exactly-once processing, handle late-arriving data
-- **Multi-column partitions** - Support composite partition keys
-- **MERGE support** - Use MERGE/UPSERT for backends that support it
+- **Partition inference** - Extract partition column from WHERE clauses automatically
+- **Multi-column partitions** - Support composite partition keys (e.g., date + region)
+- **MERGE support** - Use MERGE/UPSERT for backends that support it (instead of DELETE+INSERT)
 
 ### Test Results
 
