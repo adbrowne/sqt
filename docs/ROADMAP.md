@@ -567,7 +567,118 @@ All 29 parser tests passing, including 15 new tests for Phase 10:
 
 ---
 
-### Phase 11: Column Schema Tracking (Future)
+## ✅ Phase 11: Core SQL Clauses (COMPLETED)
+
+**Completed**: December 29, 2024
+
+### What Was Implemented
+
+- **ORDER BY clause** - Comprehensive sorting support
+  - Multiple sort expressions: `ORDER BY col1 DESC, col2 ASC`
+  - Sort direction: `ASC` / `DESC` (optional, defaults to ASC)
+  - Null ordering: `NULLS FIRST` / `NULLS LAST`
+  - Expression-based ordering (not just column references)
+
+- **LIMIT clause** - Result set size control
+  - Numeric limits: `LIMIT 10`
+  - `LIMIT ALL` for explicit unlimited results
+  - `OFFSET n` for pagination: `LIMIT 10 OFFSET 20`
+
+- **HAVING clause** - Post-aggregation filtering
+  - `HAVING COUNT(*) > 5` after GROUP BY
+  - Full expression support (same as WHERE)
+  - Proper ordering requirement (must follow GROUP BY)
+
+- **DISTINCT keyword** - Duplicate elimination
+  - `SELECT DISTINCT city FROM users`
+  - `SELECT ALL` also supported (explicit default)
+  - Parsed after SELECT, before column list
+
+- **SELECT without FROM** - Constant expressions
+  - `SELECT 1 + 1 AS result`
+  - FROM clause now optional in parser
+  - Enables calculations and function testing
+
+### Implementation Details
+
+**Lexer updates** (`crates/smelt-parser/src/lexer.rs`):
+- Added 11 new keywords: ORDER, LIMIT, OFFSET, HAVING, DISTINCT, ALL, ASC, DESC, NULLS, FIRST, LAST
+- All keywords recognized case-insensitively
+
+**Parser enhancements** (`crates/smelt-parser/src/parser.rs`):
+- `parse_having_clause()` - HAVING expression parsing
+- `parse_order_by_clause()` - Comma-separated ORDER BY items
+- `parse_order_by_item()` - Single sort specification with direction and null ordering
+- `parse_limit_clause()` - LIMIT value (number/ALL) with optional OFFSET
+- Updated `parse_select_stmt()` to handle DISTINCT/ALL and all new clauses
+- Updated `at_keyword_that_ends_table_ref()` to include new keywords
+- Made FROM clause optional (SELECT without FROM now valid)
+- Proper clause ordering enforced: SELECT [DISTINCT] ... [FROM] ... [WHERE] ... [GROUP BY] ... [HAVING] ... [ORDER BY] ... [LIMIT]
+
+**AST wrappers** (`crates/smelt-parser/src/ast.rs`):
+- `HavingClause` - with `expression()` method
+- `OrderByClause` - with `items()` iterator
+- `OrderByItem` - with `expression()`, `direction()`, `null_ordering()` methods
+- `SortDirection` enum (Asc, Desc)
+- `NullOrdering` enum (First, Last)
+- `LimitClause` - with `limit_value()`, `offset_value()` methods
+- `LimitValue` enum (Number, All)
+- Updated `SelectStmt` with:
+  - `having_clause()` method
+  - `order_by_clause()` method
+  - `limit_clause()` method
+  - `is_distinct()` method
+
+**SyntaxKind updates** (`crates/smelt-parser/src/syntax_kind.rs`):
+- Added 11 new keyword tokens
+- Added 4 new composite node types: HAVING_CLAUSE, ORDER_BY_CLAUSE, ORDER_BY_ITEM, LIMIT_CLAUSE
+- Updated `is_keyword()` to include all new keywords
+
+### Test Results
+
+All 43 parser tests passing, including 14 new tests for Phase 11:
+- `test_order_by_basic` - Simple ascending sort
+- `test_order_by_multiple` - Multiple sort columns
+- `test_order_by_nulls` - DESC NULLS LAST
+- `test_order_by_nulls_first` - ASC NULLS FIRST
+- `test_order_by_expression` - Complex expression ordering (CASE)
+- `test_limit_offset` - LIMIT 10 OFFSET 20
+- `test_limit_only` - LIMIT without OFFSET
+- `test_limit_all` - LIMIT ALL
+- `test_having_clause` - Simple HAVING with COUNT
+- `test_having_complex_expression` - HAVING with AND
+- `test_distinct` - SELECT DISTINCT
+- `test_select_all` - SELECT ALL
+- `test_complete_query` - All clauses combined
+- `test_select_without_from` - SELECT 1 + 1
+
+Cargo clippy passes with no warnings.
+
+### Design Decisions
+
+**FROM clause made optional**:
+- Aligns with PostgreSQL and DuckDB behavior
+- Enables `SELECT 1 + 1` for testing expressions
+- Useful for constant value generation
+
+**HAVING requires GROUP BY semantically but not syntactically**:
+- Parser accepts HAVING without GROUP BY (for error recovery)
+- Semantic validation should flag this as an error (future work)
+- Matches SQL standard error handling approach
+
+**LIMIT ALL vs no LIMIT**:
+- Both are valid and equivalent
+- LIMIT ALL is explicit about intent
+- Useful when overriding default limits
+
+**Expression-based ORDER BY**:
+- Supports arbitrary expressions, not just column references
+- Enables sorting by CASE expressions, computations, etc.
+- Consistent with WHERE and HAVING expression support
+
+---
+
+### Phase 12: Column Schema Tracking (Future)
 
 **Value**: Enable smarter LSP features (autocomplete, validation)
 
@@ -616,7 +727,7 @@ These features require significant architectural work and are not prioritized:
 
 ## Parser & LSP Status
 
-### ✅ Implemented (Phases 1-10, December 2024)
+### ✅ Implemented (Phases 1-11, December 2024)
 
 **Core Features:**
 - `smelt.ref()` parsing and validation
@@ -626,7 +737,7 @@ These features require significant architectural work and are not prioritized:
 - Incremental compilation via Salsa
 - Error recovery in parser
 
-**SQL Syntax (Phase 8, 10):**
+**SQL Syntax (Phases 8, 10, 11):**
 - All JOIN types (INNER, LEFT, RIGHT, FULL, CROSS)
 - ON and USING conditions
 - CASE expressions (both searched and simple forms)
@@ -634,13 +745,18 @@ These features require significant architectural work and are not prioritized:
 - Subqueries (in SELECT and FROM clauses)
 - BETWEEN, IN, EXISTS expressions
 - Unary operators (-, NOT)
+- ORDER BY clause with ASC/DESC and NULLS FIRST/LAST
+- LIMIT and OFFSET clauses
+- HAVING clause for post-aggregation filtering
+- DISTINCT and ALL keywords
+- SELECT without FROM (constant expressions)
 
 ### ⏸️ Deferred
 
 - `smelt.metric()` support (awaiting metrics design)
 - Configuration annotations (`@materialize`, etc.)
 - Column-level schema tracking
-- Additional SQL syntax (ORDER BY, LIMIT, HAVING, window functions, CTEs)
+- Additional SQL syntax (window functions, CTEs, UNION/INTERSECT/EXCEPT)
 
 ---
 

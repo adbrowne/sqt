@@ -263,6 +263,18 @@ fn keyword_or_ident(text: &str) -> SyntaxKind {
         "EXISTS" => EXISTS_KW,
         "ANY" => ANY_KW,
         "SOME" => SOME_KW,
+        // Phase 11: SQL clause keywords
+        "ORDER" => ORDER_KW,
+        "LIMIT" => LIMIT_KW,
+        "OFFSET" => OFFSET_KW,
+        "HAVING" => HAVING_KW,
+        "DISTINCT" => DISTINCT_KW,
+        "ALL" => ALL_KW,
+        "ASC" => ASC_KW,
+        "DESC" => DESC_KW,
+        "NULLS" => NULLS_KW,
+        "FIRST" => FIRST_KW,
+        "LAST" => LAST_KW,
         _ => IDENT,
     }
 }

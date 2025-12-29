@@ -144,6 +144,9 @@ impl<'a> Parser<'a> {
         self.at_any(&[
             WHERE_KW,
             GROUP_KW,
+            HAVING_KW,
+            ORDER_KW,
+            LIMIT_KW,
             // JOIN keywords
             JOIN_KW,
             INNER_KW,
@@ -188,10 +191,16 @@ impl<'a> Parser<'a> {
         // SELECT
         self.expect(SELECT_KW);
 
+        // DISTINCT / ALL (after SELECT, before select list)
+        self.skip_trivia();
+        if self.at(DISTINCT_KW) || self.at(ALL_KW) {
+            self.advance();
+        }
+
         // Select list
         self.parse_select_list();
 
-        // FROM clause
+        // FROM clause (optional - SELECT without FROM is valid)
         self.skip_trivia();
         if self.at(FROM_KW) {
             self.parse_from_clause();
@@ -207,6 +216,24 @@ impl<'a> Parser<'a> {
         self.skip_trivia();
         if self.at(GROUP_KW) {
             self.parse_group_by_clause();
+        }
+
+        // HAVING clause (must come after GROUP BY)
+        self.skip_trivia();
+        if self.at(HAVING_KW) {
+            self.parse_having_clause();
+        }
+
+        // ORDER BY clause
+        self.skip_trivia();
+        if self.at(ORDER_KW) {
+            self.parse_order_by_clause();
+        }
+
+        // LIMIT clause
+        self.skip_trivia();
+        if self.at(LIMIT_KW) {
+            self.parse_limit_clause();
         }
 
         self.finish_node();
@@ -484,6 +511,88 @@ impl<'a> Parser<'a> {
                 self.advance();
             } else {
                 break;
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_having_clause(&mut self) {
+        self.start_node(HAVING_CLAUSE);
+        self.expect(HAVING_KW);
+        self.parse_expression();
+        self.finish_node();
+    }
+
+    fn parse_order_by_clause(&mut self) {
+        self.start_node(ORDER_BY_CLAUSE);
+        self.expect(ORDER_KW);
+        self.expect(BY_KW);
+
+        // Comma-separated order items
+        loop {
+            self.parse_order_by_item();
+
+            self.skip_trivia();
+            if self.at(COMMA) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_order_by_item(&mut self) {
+        self.start_node(ORDER_BY_ITEM);
+
+        // Expression to order by
+        self.parse_expression();
+
+        // Optional ASC/DESC
+        self.skip_trivia();
+        if self.at(ASC_KW) || self.at(DESC_KW) {
+            self.advance();
+        }
+
+        // Optional NULLS FIRST/LAST
+        self.skip_trivia();
+        if self.at(NULLS_KW) {
+            self.advance();
+            self.skip_trivia();
+            if self.at(FIRST_KW) || self.at(LAST_KW) {
+                self.advance();
+            } else {
+                self.error("Expected FIRST or LAST after NULLS".to_string());
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_limit_clause(&mut self) {
+        self.start_node(LIMIT_CLAUSE);
+
+        self.expect(LIMIT_KW);
+        self.skip_trivia();
+
+        // LIMIT value (number or ALL)
+        if self.at(NUMBER) || self.at(ALL_KW) {
+            self.advance();
+        } else {
+            self.error("Expected number or ALL after LIMIT".to_string());
+        }
+
+        // Optional OFFSET
+        self.skip_trivia();
+        if self.at(OFFSET_KW) {
+            self.advance();
+            self.skip_trivia();
+            if self.at(NUMBER) {
+                self.advance();
+            } else {
+                self.error("Expected number after OFFSET".to_string());
             }
         }
 
@@ -1205,6 +1314,154 @@ mod tests {
     #[test]
     fn test_unary_minus() {
         let input = "SELECT -1 FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    // Phase 11: SQL Clause Tests
+
+    #[test]
+    fn test_order_by_basic() {
+        let input = "SELECT name FROM users ORDER BY name ASC";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_order_by_multiple() {
+        let input = "SELECT * FROM users ORDER BY last_name DESC, first_name ASC";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_order_by_nulls() {
+        let input = "SELECT * FROM users ORDER BY age DESC NULLS LAST";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_order_by_nulls_first() {
+        let input = "SELECT * FROM users ORDER BY age ASC NULLS FIRST";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_limit_offset() {
+        let input = "SELECT * FROM users LIMIT 10 OFFSET 20";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_limit_only() {
+        let input = "SELECT * FROM users LIMIT 5";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_limit_all() {
+        let input = "SELECT * FROM users LIMIT ALL";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_having_clause() {
+        let input = "SELECT dept, COUNT(*) FROM users GROUP BY dept HAVING COUNT(*) > 5";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_distinct() {
+        let input = "SELECT DISTINCT city FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_select_all() {
+        let input = "SELECT ALL city FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_complete_query() {
+        let input = "SELECT DISTINCT dept, COUNT(*) as cnt
+                     FROM users
+                     WHERE active = true
+                     GROUP BY dept
+                     HAVING COUNT(*) > 5
+                     ORDER BY cnt DESC NULLS LAST
+                     LIMIT 10 OFFSET 5";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_select_without_from() {
+        let input = "SELECT 1 + 1 AS result";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_order_by_expression() {
+        let input = "SELECT * FROM users ORDER BY CASE WHEN age > 18 THEN 1 ELSE 0 END";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_having_complex_expression() {
+        let input = "SELECT dept, AVG(salary) FROM employees GROUP BY dept HAVING AVG(salary) > 50000 AND COUNT(*) > 10";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
