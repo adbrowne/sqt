@@ -7,7 +7,9 @@ use tempfile::TempDir;
 /// Seed the test database with source data
 async fn seed_database(backend: &DuckDbBackend) -> anyhow::Result<()> {
     // Create raw schema
-    backend.execute_sql("CREATE SCHEMA IF NOT EXISTS raw").await?;
+    backend
+        .execute_sql("CREATE SCHEMA IF NOT EXISTS raw")
+        .await?;
 
     // Create users table
     backend
@@ -99,13 +101,20 @@ async fn test_incremental_delete_and_insert() -> anyhow::Result<()> {
         values: vec!["2024-12-25".to_string()],
     };
 
-    backend.delete_partitions("main", "daily_revenue", &partition).await?;
+    backend
+        .delete_partitions("main", "daily_revenue", &partition)
+        .await?;
 
     // Verify rows were deleted
     let result = backend
         .execute_sql("SELECT COUNT(*) FROM main.daily_revenue WHERE revenue_date = '2024-12-25'")
         .await?;
-    let count: i64 = result[0].column(0).as_any().downcast_ref::<arrow::array::Int64Array>().unwrap().value(0);
+    let count: i64 = result[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::Int64Array>()
+        .unwrap()
+        .value(0);
     assert_eq!(count, 0, "Expected 0 rows for 2024-12-25 after delete");
 
     // Test insert_into_from_query (simulating incremental insert)
@@ -130,7 +139,12 @@ async fn test_incremental_delete_and_insert() -> anyhow::Result<()> {
     let result = backend
         .execute_sql("SELECT COUNT(*) FROM main.daily_revenue WHERE revenue_date = '2024-12-25'")
         .await?;
-    let count: i64 = result[0].column(0).as_any().downcast_ref::<arrow::array::Int64Array>().unwrap().value(0);
+    let count: i64 = result[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::Int64Array>()
+        .unwrap()
+        .value(0);
     assert!(count > 0, "Expected rows for 2024-12-25 after insert");
 
     Ok(())
@@ -169,7 +183,9 @@ async fn test_inject_time_filter_with_existing_where() -> anyhow::Result<()> {
     // Should keep original WHERE
     assert!(result.contains("WHERE user_id = 1"));
     // Should add AND with filter
-    assert!(result.contains("AND (transaction_timestamp >= '2024-12-25' AND transaction_timestamp < '2024-12-26')"));
+    assert!(result.contains(
+        "AND (transaction_timestamp >= '2024-12-25' AND transaction_timestamp < '2024-12-26')"
+    ));
 
     Ok(())
 }

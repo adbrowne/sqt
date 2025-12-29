@@ -142,24 +142,16 @@ impl<'a> Parser<'a> {
     fn at_keyword_that_ends_table_ref(&self) -> bool {
         // Keywords that can follow a table reference in the FROM clause
         self.at_any(&[
-            WHERE_KW,
-            GROUP_KW,
-            HAVING_KW,
-            ORDER_KW,
-            LIMIT_KW,
-            // JOIN keywords
-            JOIN_KW,
-            INNER_KW,
-            LEFT_KW,
-            RIGHT_KW,
-            FULL_KW,
-            CROSS_KW,
+            WHERE_KW, GROUP_KW, HAVING_KW, ORDER_KW, LIMIT_KW, // JOIN keywords
+            JOIN_KW, INNER_KW, LEFT_KW, RIGHT_KW, FULL_KW, CROSS_KW,
         ])
     }
 
     /// Check if current token can start an expression
     fn at_expression_start(&self) -> bool {
-        self.at_any(&[IDENT, NUMBER, STRING, LPAREN, NOT_KW, CASE_KW, CAST_KW, EXISTS_KW])
+        self.at_any(&[
+            IDENT, NUMBER, STRING, LPAREN, NOT_KW, CASE_KW, CAST_KW, EXISTS_KW,
+        ])
     }
 
     // ===== Parsing rules =====
@@ -199,7 +191,31 @@ impl<'a> Parser<'a> {
 
         // DISTINCT / ALL (after SELECT, before select list)
         self.skip_trivia();
-        if self.at(DISTINCT_KW) || self.at(ALL_KW) {
+        if self.at(DISTINCT_KW) {
+            self.advance(); // DISTINCT
+            self.skip_trivia();
+            // Check for DISTINCT ON (PostgreSQL)
+            if self.at(ON_KW) {
+                self.start_node(DISTINCT_ON_CLAUSE);
+                self.advance(); // ON
+                self.skip_trivia();
+                if self.expect(LPAREN) {
+                    // Parse expression list
+                    loop {
+                        self.skip_trivia();
+                        self.parse_expression();
+                        self.skip_trivia();
+                        if self.at(COMMA) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(RPAREN);
+                }
+                self.finish_node(); // DISTINCT_ON_CLAUSE
+            }
+        } else if self.at(ALL_KW) {
             self.advance();
         }
 
@@ -337,6 +353,12 @@ impl<'a> Parser<'a> {
         self.start_node(TABLE_REF);
         self.skip_trivia();
 
+        // Check for LATERAL keyword (PostgreSQL)
+        if self.at(LATERAL_KW) {
+            self.advance(); // LATERAL
+            self.skip_trivia();
+        }
+
         if self.at(LPAREN) {
             // Could be a subquery
             let checkpoint = self.builder.checkpoint();
@@ -384,6 +406,43 @@ impl<'a> Parser<'a> {
             // else: simple identifier, already consumed
         } else {
             self.error("Expected table reference".to_string());
+        }
+
+        // Optional TABLESAMPLE clause (PostgreSQL)
+        self.skip_trivia();
+        if self.at(TABLESAMPLE_KW) {
+            self.start_node(TABLESAMPLE_CLAUSE);
+            self.advance(); // TABLESAMPLE
+            self.skip_trivia();
+
+            // Sampling method: BERNOULLI or SYSTEM
+            if self.at(BERNOULLI_KW) || self.at(SYSTEM_KW) {
+                self.advance();
+                self.skip_trivia();
+            }
+
+            // Percentage in parentheses
+            if self.expect(LPAREN) {
+                self.skip_trivia();
+                self.parse_expression(); // Sample percentage
+                self.skip_trivia();
+                self.expect(RPAREN);
+            }
+
+            // Optional REPEATABLE (seed)
+            self.skip_trivia();
+            if self.at(REPEATABLE_KW) {
+                self.advance(); // REPEATABLE
+                self.skip_trivia();
+                if self.expect(LPAREN) {
+                    self.skip_trivia();
+                    self.parse_expression(); // Seed value
+                    self.skip_trivia();
+                    self.expect(RPAREN);
+                }
+            }
+
+            self.finish_node(); // TABLESAMPLE_CLAUSE
         }
 
         // Optional AS alias (explicit with AS keyword or implicit)
@@ -445,9 +504,9 @@ impl<'a> Parser<'a> {
             return;
         }
 
-        // Parse table reference
+        // Parse table reference (may include LATERAL keyword)
         self.skip_trivia();
-        if !self.at(IDENT) {
+        if !self.at(IDENT) && !self.at(LATERAL_KW) && !self.at(LPAREN) {
             // Error recovery: missing table reference
             self.error("Expected table reference after JOIN".to_string());
             self.finish_node();
@@ -479,7 +538,6 @@ impl<'a> Parser<'a> {
                 return;
             }
             self.parse_expression();
-
         } else if self.at(USING_KW) {
             // USING (col1, col2, ...)
             self.advance();
@@ -829,6 +887,7 @@ impl<'a> Parser<'a> {
                 // Simple function call: func()
                 self.start_node_at(checkpoint, FUNCTION_CALL);
                 self.parse_arg_list();
+                self.parse_filter_clause_if_present(); // PostgreSQL FILTER clause
                 self.finish_node();
 
                 // Check for OVER clause (window function)
@@ -847,6 +906,7 @@ impl<'a> Parser<'a> {
                     // Namespaced function call: smelt.ref()
                     self.start_node_at(checkpoint, FUNCTION_CALL);
                     self.parse_arg_list();
+                    self.parse_filter_clause_if_present(); // PostgreSQL FILTER clause
                     self.finish_node();
 
                     // Check for OVER clause (window function)
@@ -1060,14 +1120,36 @@ impl<'a> Parser<'a> {
         self.finish_node();
     }
 
+    /// Parse optional FILTER clause for aggregate functions (PostgreSQL)
+    /// FILTER (WHERE condition)
+    fn parse_filter_clause_if_present(&mut self) {
+        self.skip_trivia();
+        if self.at(FILTER_KW) {
+            self.start_node(FILTER_CLAUSE);
+            self.advance(); // FILTER
+            self.skip_trivia();
+            if self.expect(LPAREN) {
+                self.skip_trivia();
+                if self.expect(WHERE_KW) {
+                    self.skip_trivia();
+                    self.parse_expression(); // Filter condition
+                    self.skip_trivia();
+                }
+                self.expect(RPAREN);
+            }
+            self.finish_node(); // FILTER_CLAUSE
+        }
+    }
+
     fn parse_argument(&mut self) {
         self.skip_trivia();
 
         // Check for named parameter: IDENT => expression
-        if self.at(IDENT) {
+        // Allow keywords to be used as parameter names (e.g., filter => ...)
+        if self.at(IDENT) || self.current().is_keyword() {
             // Look ahead to check for ARROW
             let checkpoint = self.builder.checkpoint();
-            self.advance(); // consume IDENT
+            self.advance(); // consume IDENT or keyword
             self.skip_trivia();
 
             if self.at(ARROW) {
@@ -1087,6 +1169,7 @@ impl<'a> Parser<'a> {
                     // Function call - wrap in FUNCTION_CALL
                     self.start_node_at(checkpoint, FUNCTION_CALL);
                     self.parse_arg_list();
+                    self.parse_filter_clause_if_present(); // PostgreSQL FILTER clause
                     self.finish_node();
                 } else if self.at(DOT) {
                     // Qualified name or namespaced function
@@ -1099,6 +1182,7 @@ impl<'a> Parser<'a> {
                         // Namespaced function call
                         self.start_node_at(checkpoint, FUNCTION_CALL);
                         self.parse_arg_list();
+                        self.parse_filter_clause_if_present(); // PostgreSQL FILTER clause
                         self.finish_node();
                     }
                 }
@@ -1436,7 +1520,8 @@ mod tests {
 
     #[test]
     fn test_case_simple() {
-        let input = "SELECT CASE status WHEN 'active' THEN 1 WHEN 'pending' THEN 0 ELSE -1 END FROM users";
+        let input =
+            "SELECT CASE status WHEN 'active' THEN 1 WHEN 'pending' THEN 0 ELSE -1 END FROM users";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -1556,7 +1641,8 @@ mod tests {
 
     #[test]
     fn test_in_subquery() {
-        let input = "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total > 100)";
+        let input =
+            "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total > 100)";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -1849,7 +1935,8 @@ mod tests {
 
     #[test]
     fn test_window_function_with_aggregate() {
-        let input = "SELECT dept, AVG(salary) OVER (PARTITION BY dept) as avg_dept_salary FROM employees";
+        let input =
+            "SELECT dept, AVG(salary) OVER (PARTITION BY dept) as avg_dept_salary FROM employees";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -1869,7 +1956,8 @@ mod tests {
 
     #[test]
     fn test_window_function_dense_rank() {
-        let input = "SELECT name, DENSE_RANK() OVER (PARTITION BY class ORDER BY score DESC) FROM students";
+        let input =
+            "SELECT name, DENSE_RANK() OVER (PARTITION BY class ORDER BY score DESC) FROM students";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -1889,7 +1977,8 @@ mod tests {
 
     #[test]
     fn test_window_function_lead() {
-        let input = "SELECT date, price, LEAD(price, 1) OVER (ORDER BY date) as next_price FROM prices";
+        let input =
+            "SELECT date, price, LEAD(price, 1) OVER (ORDER BY date) as next_price FROM prices";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -2023,9 +2112,7 @@ LIMIT 50
         let refs: Vec<_> = file.refs().collect();
         assert_eq!(refs.len(), 2);
 
-        let ref_names: Vec<_> = refs.iter()
-            .filter_map(|r| r.model_name())
-            .collect();
+        let ref_names: Vec<_> = refs.iter().filter_map(|r| r.model_name()).collect();
         assert!(ref_names.contains(&"raw_events".to_string()));
         assert!(ref_names.contains(&"users".to_string()));
     }
@@ -2066,4 +2153,104 @@ LIMIT 100
         assert_eq!(parse.errors.len(), 0);
     }
 
+    // Phase 14: PostgreSQL-specific features
+
+    #[test]
+    fn test_distinct_on() {
+        let input = "SELECT DISTINCT ON (user_id, date) * FROM events ORDER BY user_id, date, created_at DESC";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+
+        let root = parse.syntax();
+        let select = root.first_child().unwrap();
+        assert_eq!(select.kind(), SELECT_STMT);
+
+        // Find DISTINCT_ON_CLAUSE
+        let distinct_on = select.children().find(|n| n.kind() == DISTINCT_ON_CLAUSE);
+        assert!(
+            distinct_on.is_some(),
+            "DISTINCT ON clause should be present"
+        );
+    }
+
+    #[test]
+    fn test_distinct_on_single_expr() {
+        let input = "SELECT DISTINCT ON (category) name, price FROM products";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_lateral_join() {
+        let input = "SELECT * FROM users u LEFT JOIN LATERAL (SELECT * FROM orders WHERE user_id = u.id) o ON true";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+
+        let root = parse.syntax();
+        let text = root.text().to_string();
+        assert!(text.contains("LATERAL"), "Should contain LATERAL keyword");
+    }
+
+    #[test]
+    fn test_lateral_subquery() {
+        let input =
+            "SELECT * FROM users, LATERAL (SELECT * FROM orders WHERE user_id = users.id) o";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_tablesample_bernoulli() {
+        let input = "SELECT * FROM events TABLESAMPLE BERNOULLI (10)";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+
+        let root = parse.syntax();
+        let tablesample = root.descendants().find(|n| n.kind() == TABLESAMPLE_CLAUSE);
+        assert!(
+            tablesample.is_some(),
+            "TABLESAMPLE clause should be present"
+        );
+    }
+
+    #[test]
+    fn test_tablesample_system_with_repeatable() {
+        let input = "SELECT * FROM large_table TABLESAMPLE SYSTEM (5) REPEATABLE (123)";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_tablesample_with_alias() {
+        let input = "SELECT * FROM events TABLESAMPLE BERNOULLI (1) AS sample_data";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    // Phase 15: Aggregate function enhancements
+
+    #[test]
+    fn test_filter_clause() {
+        let input = "SELECT COUNT(*) FILTER (WHERE status = 'active') FROM users";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+
+        let root = parse.syntax();
+        let filter = root.descendants().find(|n| n.kind() == FILTER_CLAUSE);
+        assert!(filter.is_some(), "FILTER clause should be present");
+    }
+
+    #[test]
+    fn test_multiple_aggregates_with_filter() {
+        let input = "SELECT SUM(amount) FILTER (WHERE status = 'completed'), COUNT(*) FILTER (WHERE active = true) FROM orders";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_with_window_function() {
+        let input = "SELECT SUM(amount) FILTER (WHERE status = 'active') OVER (PARTITION BY user_id) FROM events";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
 }

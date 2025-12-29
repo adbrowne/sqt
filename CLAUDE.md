@@ -50,6 +50,12 @@ A next-generation data pipeline tool designed to improve upon dbt by:
 # Build the entire workspace
 cargo build
 
+# Format code (required before committing)
+cargo fmt --all
+
+# Check formatting without modifying files
+cargo fmt --all -- --check
+
 # Run clippy (linter) - must pass with no warnings
 cargo clippy --all-targets
 
@@ -246,10 +252,11 @@ The `examples/` directory contains SQL model examples demonstrating smelt capabi
 3. Update smelt-db queries if needed (usually automatic via AST)
 4. Update LSP features if needed (diagnostics, goto-definition, etc.)
 5. Test with test-workspace models
-6. **Run `cargo clippy --all-targets` and fix all warnings**
-7. Run `cargo build` and `cargo test` to ensure everything compiles and passes
-8. Update docs/ROADMAP.md with completion status and date
-9. **Commit locally** with descriptive message (includes ROADMAP.md update)
+6. **Run `cargo fmt --all` to format code**
+7. **Run `cargo clippy --all-targets` and fix all warnings**
+8. Run `cargo build` and `cargo test` to ensure everything compiles and passes
+9. Update docs/ROADMAP.md with completion status and date
+10. **Commit locally** with descriptive message (includes ROADMAP.md update)
    - In Docker: Commits stay local, review on host before pushing
    - On host: Can push directly if appropriate
 

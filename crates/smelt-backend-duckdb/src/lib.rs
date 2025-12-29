@@ -32,19 +32,20 @@ impl DuckDbBackend {
         let connection = tokio::task::spawn_blocking(move || {
             // Create parent directory if needed
             if let Some(parent) = database_path.parent() {
-                std::fs::create_dir_all(parent).with_context(|| {
-                    format!("Failed to create directory: {:?}", parent)
-                })?;
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("Failed to create directory: {:?}", parent))?;
             }
 
             // Open file-based connection (persistent)
-            let connection = Connection::open(&database_path).with_context(|| {
-                format!("Failed to open DuckDB database: {:?}", database_path)
-            })?;
+            let connection = Connection::open(&database_path)
+                .with_context(|| format!("Failed to open DuckDB database: {:?}", database_path))?;
 
             // Ensure schema exists
             connection
-                .execute(&format!("CREATE SCHEMA IF NOT EXISTS {}", schema_for_init), [])
+                .execute(
+                    &format!("CREATE SCHEMA IF NOT EXISTS {}", schema_for_init),
+                    [],
+                )
                 .with_context(|| format!("Failed to create schema: {}", schema_for_init))?;
 
             Ok::<_, anyhow::Error>(Arc::new(Mutex::new(connection)))
@@ -53,14 +54,15 @@ impl DuckDbBackend {
         .map_err(|e| BackendError::connection_failed(e.to_string()))?
         .map_err(|e| BackendError::connection_failed(e.to_string()))?;
 
-        Ok(Self {
-            connection,
-            schema,
-        })
+        Ok(Self { connection, schema })
     }
 
     /// Check if a table exists in the information schema.
-    pub async fn table_exists_sync(&self, schema: &str, table_name: &str) -> Result<bool, BackendError> {
+    pub async fn table_exists_sync(
+        &self,
+        schema: &str,
+        table_name: &str,
+    ) -> Result<bool, BackendError> {
         let query = "SELECT COUNT(*) > 0 FROM information_schema.tables WHERE table_schema = ? AND table_name = ?";
         let connection = Arc::clone(&self.connection);
         let schema = schema.to_string();
@@ -84,13 +86,13 @@ impl Backend for DuckDbBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = connection.lock().unwrap();
-            let mut stmt = conn.prepare(&sql).map_err(|e| {
-                BackendError::execution_failed("query", e.to_string())
-            })?;
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|e| BackendError::execution_failed("query", e.to_string()))?;
 
-            let result = stmt.query_arrow([]).map_err(|e| {
-                BackendError::execution_failed("query", e.to_string())
-            })?;
+            let result = stmt
+                .query_arrow([])
+                .map_err(|e| BackendError::execution_failed("query", e.to_string()))?;
 
             Ok(result.collect())
         })
@@ -110,9 +112,8 @@ impl Backend for DuckDbBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = connection.lock().unwrap();
-            conn.execute(&create_sql, []).map_err(|e| {
-                BackendError::execution_failed(table_name.clone(), e.to_string())
-            })?;
+            conn.execute(&create_sql, [])
+                .map_err(|e| BackendError::execution_failed(table_name.clone(), e.to_string()))?;
             Ok(())
         })
         .await
@@ -131,9 +132,8 @@ impl Backend for DuckDbBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = connection.lock().unwrap();
-            conn.execute(&create_sql, []).map_err(|e| {
-                BackendError::execution_failed(view_name.clone(), e.to_string())
-            })?;
+            conn.execute(&create_sql, [])
+                .map_err(|e| BackendError::execution_failed(view_name.clone(), e.to_string()))?;
             Ok(())
         })
         .await
@@ -147,9 +147,8 @@ impl Backend for DuckDbBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = connection.lock().unwrap();
-            conn.execute(&drop_sql, []).map_err(|e| {
-                BackendError::execution_failed(table_name.clone(), e.to_string())
-            })?;
+            conn.execute(&drop_sql, [])
+                .map_err(|e| BackendError::execution_failed(table_name.clone(), e.to_string()))?;
             Ok(())
         })
         .await
@@ -163,9 +162,8 @@ impl Backend for DuckDbBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = connection.lock().unwrap();
-            conn.execute(&drop_sql, []).map_err(|e| {
-                BackendError::execution_failed(view_name.clone(), e.to_string())
-            })?;
+            conn.execute(&drop_sql, [])
+                .map_err(|e| BackendError::execution_failed(view_name.clone(), e.to_string()))?;
             Ok(())
         })
         .await
@@ -198,13 +196,13 @@ impl Backend for DuckDbBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = connection.lock().unwrap();
-            let mut stmt = conn.prepare(&sql).map_err(|e| {
-                BackendError::execution_failed(table_name.clone(), e.to_string())
-            })?;
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|e| BackendError::execution_failed(table_name.clone(), e.to_string()))?;
 
-            let result = stmt.query_arrow([]).map_err(|e| {
-                BackendError::execution_failed(table_name.clone(), e.to_string())
-            })?;
+            let result = stmt
+                .query_arrow([])
+                .map_err(|e| BackendError::execution_failed(table_name.clone(), e.to_string()))?;
 
             Ok(result.collect())
         })
@@ -263,9 +261,8 @@ impl Backend for DuckDbBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = connection.lock().unwrap();
-            conn.execute(&delete_sql, []).map_err(|e| {
-                BackendError::execution_failed(table_name.clone(), e.to_string())
-            })?;
+            conn.execute(&delete_sql, [])
+                .map_err(|e| BackendError::execution_failed(table_name.clone(), e.to_string()))?;
             Ok(())
         })
         .await
@@ -284,9 +281,8 @@ impl Backend for DuckDbBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = connection.lock().unwrap();
-            conn.execute(&insert_sql, []).map_err(|e| {
-                BackendError::execution_failed(table_name.clone(), e.to_string())
-            })?;
+            conn.execute(&insert_sql, [])
+                .map_err(|e| BackendError::execution_failed(table_name.clone(), e.to_string()))?;
             Ok(())
         })
         .await

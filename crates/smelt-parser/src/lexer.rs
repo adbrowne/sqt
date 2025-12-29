@@ -291,6 +291,14 @@ fn keyword_or_ident(text: &str) -> SyntaxKind {
         "WITH" => WITH_KW,
         "RECURSIVE" => RECURSIVE_KW,
         "UNION" => UNION_KW,
+        // Phase 14: PostgreSQL-specific keywords
+        "LATERAL" => LATERAL_KW,
+        "TABLESAMPLE" => TABLESAMPLE_KW,
+        "BERNOULLI" => BERNOULLI_KW,
+        "SYSTEM" => SYSTEM_KW,
+        "REPEATABLE" => REPEATABLE_KW,
+        // Phase 15: Aggregate function keywords
+        "FILTER" => FILTER_KW,
         _ => IDENT,
     }
 }

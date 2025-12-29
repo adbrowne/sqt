@@ -27,8 +27,12 @@ pub trait Backend: Send + Sync {
     async fn execute_sql(&self, sql: &str) -> Result<Vec<RecordBatch>, BackendError>;
 
     /// Create a table from a SQL query.
-    async fn create_table_as(&self, schema: &str, name: &str, sql: &str)
-        -> Result<(), BackendError>;
+    async fn create_table_as(
+        &self,
+        schema: &str,
+        name: &str,
+        sql: &str,
+    ) -> Result<(), BackendError>;
 
     /// Create a view from a SQL query.
     async fn create_view_as(&self, schema: &str, name: &str, sql: &str)

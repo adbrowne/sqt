@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 rowan.workspace = true
+
+[dev-dependencies]
+proptest = "1.4"

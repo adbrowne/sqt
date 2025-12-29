@@ -1,3 +1,7 @@
+pub mod ast;
+pub mod lexer;
+pub mod parser;
+pub mod printer;
 /// smelt-parser - Rowan-based parser for smelt SQL files
 ///
 /// This crate provides a standalone parser for smelt model files, which are
@@ -10,13 +14,11 @@
 ///
 /// This crate is standalone and can be used independently of the LSP or Salsa.
 pub mod syntax_kind;
-pub mod lexer;
-pub mod parser;
-pub mod ast;
 
-pub use syntax_kind::SyntaxKind;
-pub use parser::{parse, Parse, ParseError};
 pub use ast::*;
+pub use parser::{parse, Parse, ParseError};
+pub use printer::{FormatContext, FormatMode};
+pub use syntax_kind::SyntaxKind;
 
 /// Re-export Rowan types for convenience
 pub use rowan::TextRange;

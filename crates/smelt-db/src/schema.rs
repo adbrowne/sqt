@@ -41,15 +41,11 @@ pub enum ColumnSource {
 
     /// Wildcard select (*) - expanded to all columns from source
     /// Example: `SELECT * FROM {{ ref('users') }}`
-    Wildcard {
-        model_name: String,
-    },
+    Wildcard { model_name: String },
 
     /// Column from a non-ref table (e.g., source.events)
     /// External tables that aren't sqt models
-    ExternalTable {
-        table_name: String,
-    },
+    ExternalTable { table_name: String },
 
     /// Unable to determine source (error recovery)
     Unknown,

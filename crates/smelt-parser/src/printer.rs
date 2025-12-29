@@ -1,0 +1,618 @@
+/// SQL printer for converting AST back to SQL
+///
+/// This module provides Display implementations for AST nodes to enable
+/// round-trip testing (parse → print → parse).
+///
+/// Formatting rules:
+/// - Keywords: UPPERCASE
+/// - Identifiers: preserve case
+/// - Indentation: 2 spaces (in Pretty mode)
+/// - Line breaks: at major clauses (in Pretty mode)
+use crate::ast::*;
+use crate::syntax_kind::SyntaxNode;
+use crate::SyntaxKind::*;
+use std::fmt::{self, Display};
+
+/// Format mode for SQL printing
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatMode {
+    /// Single-line output (no line breaks)
+    Compact,
+    /// Multi-line with indentation
+    Pretty,
+}
+
+/// Context for formatting SQL
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Will be used for pretty printing in future
+pub struct FormatContext {
+    mode: FormatMode,
+    indent_level: usize,
+}
+
+#[allow(dead_code)] // Will be used for pretty printing in future
+impl FormatContext {
+    pub fn new(mode: FormatMode) -> Self {
+        Self {
+            mode,
+            indent_level: 0,
+        }
+    }
+
+    pub fn compact() -> Self {
+        Self::new(FormatMode::Compact)
+    }
+
+    pub fn pretty() -> Self {
+        Self::new(FormatMode::Pretty)
+    }
+
+    fn indent(&self) -> String {
+        if self.mode == FormatMode::Compact {
+            String::new()
+        } else {
+            "  ".repeat(self.indent_level)
+        }
+    }
+
+    fn newline(&self) -> &str {
+        if self.mode == FormatMode::Compact {
+            " "
+        } else {
+            "\n"
+        }
+    }
+
+    fn with_indent(&self) -> Self {
+        Self {
+            mode: self.mode,
+            indent_level: self.indent_level + 1,
+        }
+    }
+}
+
+// ===== Basic Display implementations =====
+
+impl Display for File {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(stmt) = self.select_stmt() {
+            write!(f, "{}", stmt)?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for SelectStmt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // WITH clause
+        if let Some(with_clause) = self.with_clause() {
+            write!(f, "{} ", with_clause)?;
+        }
+
+        // SELECT
+        write!(f, "SELECT")?;
+
+        // DISTINCT
+        if self.is_distinct() {
+            write!(f, " DISTINCT")?;
+        }
+
+        // SELECT list
+        if let Some(select_list) = self.select_list() {
+            write!(f, " {}", select_list)?;
+        }
+
+        // FROM clause
+        if let Some(from_clause) = self.from_clause() {
+            write!(f, " FROM {}", from_clause)?;
+        }
+
+        // WHERE clause
+        if let Some(where_clause) = self.where_clause() {
+            let full_text = where_clause.text();
+            // Remove the "WHERE" keyword from the text
+            let expr_text = full_text
+                .trim_start_matches("WHERE")
+                .trim_start_matches("where")
+                .trim();
+            write!(f, " WHERE {}", expr_text)?;
+        }
+
+        // GROUP BY clause
+        if let Some(group_by) = self
+            .syntax()
+            .children()
+            .find(|n| n.kind() == GROUP_BY_CLAUSE)
+        {
+            write!(f, " GROUP BY {}", extract_group_by_expressions(&group_by))?;
+        }
+
+        // HAVING clause
+        if let Some(having_clause) = self.having_clause() {
+            write!(f, " HAVING {}", having_clause)?;
+        }
+
+        // ORDER BY clause
+        if let Some(order_by_clause) = self.order_by_clause() {
+            write!(f, " {}", order_by_clause)?;
+        }
+
+        // LIMIT clause
+        if let Some(limit_clause) = self.limit_clause() {
+            write!(f, " {}", limit_clause)?;
+        }
+
+        // UNION
+        if has_union(self.syntax()) {
+            write!(f, " UNION")?;
+            if has_union_all(self.syntax()) {
+                write!(f, " ALL")?;
+            }
+            // Get the next SELECT statement after UNION
+            if let Some(union_select) = get_union_select(self.syntax()) {
+                write!(f, " {}", union_select)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for SelectList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let items: Vec<_> = self.items().collect();
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", item)?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for SelectItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Try to get the expression, or fall back to raw text
+        if let Some(expr) = self.expression() {
+            write!(f, "{}", expr.text())?;
+        } else {
+            // For simple tokens like * that don't have an EXPRESSION wrapper,
+            // extract the text directly (excluding AS and alias if present)
+            let text = self.syntax().text().to_string();
+            if self.alias().is_some() {
+                // Remove "AS alias" part
+                if let Some(as_pos) = text.to_uppercase().find(" AS ") {
+                    write!(f, "{}", text[..as_pos].trim())?;
+                } else {
+                    write!(f, "{}", text.trim())?;
+                }
+            } else {
+                write!(f, "{}", text.trim())?;
+            }
+        }
+
+        if let Some(alias) = self.alias() {
+            write!(f, " AS {}", alias)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for FromClause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Get first table ref
+        let mut table_refs = self.table_refs();
+        if let Some(first_table) = table_refs.next() {
+            write!(f, "{}", first_table)?;
+        }
+
+        // Get all JOINs
+        for join in self.joins() {
+            write!(f, " {}", join)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for TableRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(func_call) = self.function_call() {
+            write!(f, "{}", func_call.text())?;
+        } else if let Some(ident) = self.identifier() {
+            write!(f, "{}", ident)?;
+        } else {
+            // Subquery in FROM
+            write!(f, "{}", self.syntax().text())?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for JoinClause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Join type
+        match self.join_type() {
+            Some(JoinType::Inner) => write!(f, "INNER JOIN")?,
+            Some(JoinType::Left) => write!(f, "LEFT JOIN")?,
+            Some(JoinType::Right) => write!(f, "RIGHT JOIN")?,
+            Some(JoinType::Full) => write!(f, "FULL JOIN")?,
+            Some(JoinType::Cross) => write!(f, "CROSS JOIN")?,
+            None => write!(f, "JOIN")?, // Bare JOIN (defaults to INNER)
+        }
+
+        // Table reference
+        if let Some(table_ref) = self.table_ref() {
+            write!(f, " {}", table_ref)?;
+        }
+
+        // Join condition
+        if let Some(condition) = self.condition() {
+            write!(f, " {}", condition)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for JoinCondition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_on() {
+            write!(f, "ON ")?;
+            if let Some(expr) = self.on_expression() {
+                write!(f, "{}", expr.text())?;
+            }
+        } else if self.is_using() {
+            write!(f, "USING (")?;
+            let columns = self.using_columns();
+            for (i, col) in columns.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", col)?;
+            }
+            write!(f, ")")?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for HavingClause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(expr) = self.expression() {
+            write!(f, "{}", expr.text())?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for OrderByClause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ORDER BY ")?;
+        let items: Vec<_> = self.items().collect();
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", item)?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for OrderByItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(expr) = self.expression() {
+            write!(f, "{}", expr.text())?;
+        }
+
+        if let Some(direction) = self.direction() {
+            match direction {
+                SortDirection::Asc => write!(f, " ASC")?,
+                SortDirection::Desc => write!(f, " DESC")?,
+            }
+        }
+
+        if let Some(null_ordering) = self.null_ordering() {
+            match null_ordering {
+                NullOrdering::First => write!(f, " NULLS FIRST")?,
+                NullOrdering::Last => write!(f, " NULLS LAST")?,
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for LimitClause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Try structured extraction first
+        if let Some(limit_val) = self.limit_value() {
+            write!(f, "LIMIT ")?;
+            match limit_val {
+                LimitValue::Number(n) => write!(f, "{}", n)?,
+                LimitValue::All => write!(f, "ALL")?,
+            }
+
+            if let Some(offset) = self.offset_value() {
+                write!(f, " OFFSET {}", offset)?;
+            }
+        } else {
+            // Fall back to raw text if structured extraction fails
+            write!(f, "{}", self.syntax().text())?;
+        }
+
+        Ok(())
+    }
+}
+
+// ===== Window Functions (Phase 12) =====
+
+impl Display for WindowSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "OVER (")?;
+
+        let mut needs_space = false;
+
+        if let Some(partition_by) = self.partition_by() {
+            write!(f, "{}", partition_by)?;
+            needs_space = true;
+        }
+
+        if let Some(order_by) = self.order_by() {
+            if needs_space {
+                write!(f, " ")?;
+            }
+            write!(f, "{}", order_by)?;
+            needs_space = true;
+        }
+
+        if let Some(frame) = self.frame() {
+            if needs_space {
+                write!(f, " ")?;
+            }
+            write!(f, "{}", frame)?;
+        }
+
+        write!(f, ")")?;
+        Ok(())
+    }
+}
+
+impl Display for PartitionByClause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PARTITION BY ")?;
+        let exprs: Vec<_> = self.expressions().collect();
+        for (i, expr) in exprs.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", expr.text())?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for WindowFrame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.unit() {
+            Some(FrameUnit::Rows) => write!(f, "ROWS")?,
+            Some(FrameUnit::Range) => write!(f, "RANGE")?,
+            Some(FrameUnit::Groups) => write!(f, "GROUPS")?,
+            None => {}
+        }
+
+        let bounds = self.bounds();
+        if bounds.len() == 1 {
+            write!(f, " {}", bounds[0].text())?;
+        } else if bounds.len() == 2 {
+            write!(f, " BETWEEN {} AND {}", bounds[0].text(), bounds[1].text())?;
+        }
+
+        Ok(())
+    }
+}
+
+// ===== CTEs (Phase 13) =====
+
+impl Display for WithClause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "WITH")?;
+
+        if self.is_recursive() {
+            write!(f, " RECURSIVE")?;
+        }
+
+        let ctes: Vec<_> = self.ctes().collect();
+        for (i, cte) in ctes.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, " {}", cte)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for Cte {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(name) = self.name() {
+            write!(f, "{}", name)?;
+        }
+
+        // Column list
+        let columns = self.column_names();
+        if !columns.is_empty() {
+            write!(f, "(")?;
+            for (i, col) in columns.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", col)?;
+            }
+            write!(f, ")")?;
+        }
+
+        write!(f, " AS ")?;
+
+        if let Some(query) = self.query() {
+            write!(f, "{}", query)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for Subquery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        if let Some(select) = self.select_stmt() {
+            write!(f, "{}", select)?;
+        }
+        write!(f, ")")?;
+        Ok(())
+    }
+}
+
+// ===== Helper functions =====
+
+/// Extract GROUP BY expressions from syntax node
+fn extract_group_by_expressions(node: &SyntaxNode) -> String {
+    let mut expressions = Vec::new();
+    for child in node.children() {
+        if child.kind() == EXPRESSION || child.kind() == BINARY_EXPR {
+            expressions.push(child.text().to_string());
+        }
+    }
+    expressions.join(", ")
+}
+
+/// Check if SELECT has UNION
+fn has_union(node: &SyntaxNode) -> bool {
+    node.children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .any(|t| t.kind() == UNION_KW)
+}
+
+/// Check if UNION is UNION ALL
+fn has_union_all(node: &SyntaxNode) -> bool {
+    let tokens: Vec<_> = node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .collect();
+
+    for i in 0..tokens.len() {
+        if tokens[i].kind() == UNION_KW && i + 1 < tokens.len() && tokens[i + 1].kind() == ALL_KW {
+            return true;
+        }
+    }
+    false
+}
+
+/// Get SELECT statement after UNION
+fn get_union_select(node: &SyntaxNode) -> Option<SelectStmt> {
+    let mut found_union = false;
+    for child in node.children() {
+        if found_union && child.kind() == SELECT_STMT {
+            return SelectStmt::cast(child);
+        }
+    }
+
+    // Check tokens for UNION
+    for child in node.children_with_tokens() {
+        if let Some(token) = child.as_token() {
+            if token.kind() == UNION_KW {
+                found_union = true;
+            }
+        } else if found_union {
+            if let Some(n) = child.as_node() {
+                if n.kind() == SELECT_STMT {
+                    return SelectStmt::cast(n.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse;
+
+    fn assert_round_trip(sql: &str) {
+        let parse1 = parse(sql);
+        assert_eq!(parse1.errors.len(), 0, "Parse errors: {:?}", parse1.errors);
+
+        let file = File::cast(parse1.syntax()).unwrap();
+        let printed = file.to_string();
+
+        let parse2 = parse(&printed);
+        assert_eq!(
+            parse2.errors.len(),
+            0,
+            "Re-parse errors: {:?}\nPrinted SQL: {}",
+            parse2.errors,
+            printed
+        );
+
+        // For debugging: print both versions
+        if printed.trim() != sql.trim() {
+            eprintln!("Original: {}", sql);
+            eprintln!("Printed:  {}", printed);
+        }
+    }
+
+    #[test]
+    fn test_simple_select() {
+        assert_round_trip("SELECT * FROM users");
+    }
+
+    #[test]
+    fn test_select_with_alias() {
+        assert_round_trip("SELECT name AS user_name FROM users");
+    }
+
+    #[test]
+    fn test_select_join() {
+        assert_round_trip("SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id");
+    }
+
+    #[test]
+    fn test_select_where() {
+        assert_round_trip("SELECT * FROM users WHERE age > 18");
+    }
+
+    #[test]
+    fn test_select_order_by() {
+        assert_round_trip("SELECT * FROM users ORDER BY name ASC");
+    }
+
+    #[test]
+    fn test_select_limit() {
+        assert_round_trip("SELECT * FROM users LIMIT 10");
+    }
+
+    #[test]
+    fn test_select_cte() {
+        assert_round_trip("WITH active_users AS (SELECT * FROM users WHERE status = 'active') SELECT * FROM active_users");
+    }
+
+    #[test]
+    fn test_select_window_function() {
+        assert_round_trip("SELECT ROW_NUMBER() OVER (ORDER BY created_at) FROM events");
+    }
+
+    #[test]
+    fn test_select_distinct() {
+        assert_round_trip("SELECT DISTINCT city FROM users");
+    }
+
+    #[test]
+    fn test_select_group_by_having() {
+        assert_round_trip("SELECT city, COUNT(*) FROM users GROUP BY city HAVING COUNT(*) > 5");
+    }
+}

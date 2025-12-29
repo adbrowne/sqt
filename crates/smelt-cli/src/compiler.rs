@@ -264,10 +264,7 @@ FROM smelt.ref('raw_events', filter => event_type = 'page_view')
         let compiler = SqlCompiler::new(config);
         let compiled = compiler.compile(&model, "main").unwrap();
 
-        assert!(matches!(
-            compiled.materialization,
-            Materialization::Table
-        ));
+        assert!(matches!(compiled.materialization, Materialization::Table));
     }
 
     #[test]
