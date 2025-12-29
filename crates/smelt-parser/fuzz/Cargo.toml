@@ -1,0 +1,30 @@
+[package]
+name = "smelt-parser-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.smelt-parser]
+path = ".."
+
+# Fuzz target: Verify parser never panics
+[[bin]]
+name = "parse_never_panics"
+path = "fuzz_targets/parse_never_panics.rs"
+test = false
+doc = false
+bench = false
+
+# Fuzz target: Verify round-trip preservation
+[[bin]]
+name = "round_trip"
+path = "fuzz_targets/round_trip.rs"
+test = false
+doc = false
+bench = false

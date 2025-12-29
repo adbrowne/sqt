@@ -64,6 +64,12 @@ pub enum SyntaxKind {
     WITH_KW,
     RECURSIVE_KW,
     UNION_KW,
+    // Phase 14: PostgreSQL-specific keywords
+    LATERAL_KW,
+    TABLESAMPLE_KW,
+    BERNOULLI_KW,
+    SYSTEM_KW,
+    REPEATABLE_KW,
 
     // Operators & punctuation
     LPAREN,   // (
@@ -129,6 +135,9 @@ pub enum SyntaxKind {
     // Phase 13: CTE nodes
     WITH_CLAUSE,         // WITH clause (entire WITH statement)
     CTE,                 // Single common table expression
+    // Phase 14: PostgreSQL-specific nodes
+    DISTINCT_ON_CLAUSE,  // DISTINCT ON (expr, expr)
+    TABLESAMPLE_CLAUSE,  // TABLESAMPLE method (percentage) REPEATABLE (seed)
 
     // Error handling
     ERROR, // Invalid syntax
@@ -153,6 +162,7 @@ impl SyntaxKind {
             | OVER_KW | PARTITION_KW | WINDOW_KW | ROWS_KW | RANGE_KW | GROUPS_KW
             | UNBOUNDED_KW | PRECEDING_KW | FOLLOWING_KW | CURRENT_KW | ROW_KW
             | WITH_KW | RECURSIVE_KW | UNION_KW
+            | LATERAL_KW | TABLESAMPLE_KW | BERNOULLI_KW | SYSTEM_KW | REPEATABLE_KW
         )
     }
 

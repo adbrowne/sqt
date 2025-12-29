@@ -199,7 +199,31 @@ impl<'a> Parser<'a> {
 
         // DISTINCT / ALL (after SELECT, before select list)
         self.skip_trivia();
-        if self.at(DISTINCT_KW) || self.at(ALL_KW) {
+        if self.at(DISTINCT_KW) {
+            self.advance(); // DISTINCT
+            self.skip_trivia();
+            // Check for DISTINCT ON (PostgreSQL)
+            if self.at(ON_KW) {
+                self.start_node(DISTINCT_ON_CLAUSE);
+                self.advance(); // ON
+                self.skip_trivia();
+                if self.expect(LPAREN) {
+                    // Parse expression list
+                    loop {
+                        self.skip_trivia();
+                        self.parse_expression();
+                        self.skip_trivia();
+                        if self.at(COMMA) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(RPAREN);
+                }
+                self.finish_node(); // DISTINCT_ON_CLAUSE
+            }
+        } else if self.at(ALL_KW) {
             self.advance();
         }
 
@@ -2063,6 +2087,30 @@ LIMIT 100
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
         }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    // Phase 14: PostgreSQL-specific features
+
+    #[test]
+    fn test_distinct_on() {
+        let input = "SELECT DISTINCT ON (user_id, date) * FROM events ORDER BY user_id, date, created_at DESC";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+
+        let root = parse.syntax();
+        let select = root.first_child().unwrap();
+        assert_eq!(select.kind(), SELECT_STMT);
+
+        // Find DISTINCT_ON_CLAUSE
+        let distinct_on = select.children().find(|n| n.kind() == DISTINCT_ON_CLAUSE);
+        assert!(distinct_on.is_some(), "DISTINCT ON clause should be present");
+    }
+
+    #[test]
+    fn test_distinct_on_single_expr() {
+        let input = "SELECT DISTINCT ON (category) name, price FROM products";
+        let parse = parse(input);
         assert_eq!(parse.errors.len(), 0);
     }
 
