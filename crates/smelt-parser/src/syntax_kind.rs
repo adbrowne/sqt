@@ -24,6 +24,18 @@ pub enum SyntaxKind {
     CROSS_KW,
     ON_KW,
     USING_KW,
+    // Phase 10: Expression keywords
+    CASE_KW,
+    WHEN_KW,
+    THEN_KW,
+    ELSE_KW,
+    END_KW,
+    CAST_KW,
+    BETWEEN_KW,
+    IN_KW,
+    EXISTS_KW,
+    ANY_KW,
+    SOME_KW,
 
     // Operators & punctuation
     LPAREN,   // (
@@ -42,6 +54,7 @@ pub enum SyntaxKind {
     MULTIPLY, // * (same as STAR, but in expression context)
     DIVIDE,   // /
     ARROW,    // => (named parameter)
+    DOUBLE_COLON, // :: (PostgreSQL cast operator)
 
     // Literals & identifiers
     STRING,     // 'value' or "value"
@@ -66,6 +79,15 @@ pub enum SyntaxKind {
     FUNCTION_CALL,   // COUNT(*), SUM(col), ref('model')
     ARG_LIST,        // (arg1, arg2)
     NAMED_PARAM,     // param_name => value
+    // Phase 10: Expression nodes
+    CASE_EXPR,       // CASE WHEN ... THEN ... END
+    WHEN_CLAUSE,     // WHEN condition THEN result
+    CAST_EXPR,       // CAST(expr AS type) or expr::type
+    TYPE_SPEC,       // Type specification (INT, VARCHAR(255), etc.)
+    SUBQUERY,        // (SELECT ...)
+    BETWEEN_EXPR,    // expr BETWEEN low AND high
+    IN_EXPR,         // expr IN (values...)
+    EXISTS_EXPR,     // EXISTS (subquery)
 
     // Error handling
     ERROR, // Invalid syntax
@@ -83,6 +105,8 @@ impl SyntaxKind {
             SELECT_KW | FROM_KW | WHERE_KW | GROUP_KW | BY_KW | AS_KW | AND_KW | OR_KW | NOT_KW
             | IS_KW | NULL_KW | JOIN_KW | INNER_KW | LEFT_KW | RIGHT_KW | FULL_KW | OUTER_KW
             | CROSS_KW | ON_KW | USING_KW
+            | CASE_KW | WHEN_KW | THEN_KW | ELSE_KW | END_KW | CAST_KW | BETWEEN_KW | IN_KW
+            | EXISTS_KW | ANY_KW | SOME_KW
         )
     }
 

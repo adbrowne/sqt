@@ -467,7 +467,107 @@ Phase 9 includes complete end-to-end incremental materialization with CLI integr
 
 ---
 
-### Phase 10: Column Schema Tracking
+## ✅ Phase 10: Expression Enhancements (COMPLETED)
+
+**Completed**: December 29, 2024
+
+### What Was Implemented
+
+- **CASE expressions** - Both searched and simple forms
+  - `CASE WHEN condition THEN result ... ELSE default END` (searched)
+  - `CASE expr WHEN value THEN result ... ELSE default END` (simple)
+  - Multiple WHEN clauses supported
+  - Optional ELSE clause
+
+- **CAST expressions** - Standard SQL and PostgreSQL syntax
+  - `CAST(expr AS type)` - Standard SQL syntax
+  - `expr::type` - PostgreSQL double-colon operator
+  - Type specifications with parameters: `VARCHAR(255)`, `DECIMAL(10,2)`
+
+- **Subqueries** - In SELECT list and FROM clause
+  - Scalar subqueries in SELECT: `(SELECT COUNT(*) FROM orders)`
+  - Derived tables in FROM: `FROM (SELECT ...) AS alias`
+  - Proper SELECT statement parsing within parentheses
+
+- **BETWEEN expressions**
+  - `expr BETWEEN low AND high` syntax
+  - Expression-based bounds (not just literals)
+
+- **IN expressions** - Both value lists and subqueries
+  - Value lists: `status IN ('active', 'pending')`
+  - Subqueries: `id IN (SELECT user_id FROM orders)`
+
+- **EXISTS expressions**
+  - `EXISTS (SELECT ... FROM ...)` syntax
+  - Subquery validation
+
+- **Unary operators** - Negative numbers and NOT
+  - Unary minus: `-1`, `-amount`
+  - Recursive unary chaining: `--x`
+  - NOT operator for boolean negation
+
+### Implementation Details
+
+**Lexer updates** (`crates/smelt-parser/src/lexer.rs`):
+- Added 11 new keywords: CASE, WHEN, THEN, ELSE, END, CAST, BETWEEN, IN, EXISTS, ANY, SOME
+- Added DOUBLE_COLON (`::`) operator for PostgreSQL casts
+- Added MINUS operator (previously missing, causing `-1` to fail)
+
+**Parser enhancements** (`crates/smelt-parser/src/parser.rs`):
+- `parse_case_expr()` - Handles both simple and searched CASE forms
+- `parse_when_clause()` - Parses WHEN...THEN clauses
+- `parse_cast_expr()` - Standard CAST(... AS ...) syntax
+- `parse_type_spec()` - Type names with optional parameters
+- `parse_subquery()` - SELECT statements in parentheses
+- `parse_exists_expr()` - EXISTS (subquery) syntax
+- `parse_between_expr()` - BETWEEN low AND high
+- `parse_in_expr()` - IN (values/subquery) with discrimination
+- `parse_unary_expr()` - Unary minus and NOT operators
+- Updated `parse_primary_expr()` to detect CASE, CAST, EXISTS, subqueries, and `::` casts
+- Updated `parse_comparison_expr()` to handle BETWEEN and IN
+- Updated `parse_table_ref()` to support subqueries in FROM clause
+- Updated `at_expression_start()` to include new expression keywords
+
+**AST wrappers** (`crates/smelt-parser/src/ast.rs`):
+- `CaseExpr` - with `case_value()`, `when_clauses()`, `else_expr()` methods
+- `WhenClause` - with `condition()`, `result()` methods
+- `CastExpr` - with `expression()`, `type_spec()`, `is_double_colon_cast()` methods
+- `TypeSpec` - with `type_name()`, `full_text()` methods
+- `Subquery` - with `select_stmt()` method
+- `BetweenExpr` - with `lower_bound()`, `upper_bound()` methods
+- `InExpr` - with `is_subquery()`, `subquery()`, `values()` methods
+- `ExistsExpr` - with `subquery()` method
+- Updated `Expr` with `as_case()`, `as_cast()`, `as_subquery()`, `as_between()`, `as_in()`, `as_exists()` methods
+
+### Test Results
+
+All 29 parser tests passing, including 15 new tests for Phase 10:
+- `test_case_searched` - Searched CASE with multiple WHENs
+- `test_case_simple` - Simple CASE matching values
+- `test_case_no_else` - CASE without ELSE clause
+- `test_cast_standard` - CAST(price AS INTEGER)
+- `test_cast_postgres_double_colon` - price::INTEGER
+- `test_cast_with_params` - CAST(name AS VARCHAR(255))
+- `test_cast_decimal` - CAST(amount AS DECIMAL(10, 2))
+- `test_subquery_in_select` - Scalar subquery in SELECT list
+- `test_subquery_in_from` - Derived table in FROM clause
+- `test_between` - price BETWEEN 10 AND 100
+- `test_between_with_expressions` - BETWEEN with column references
+- `test_in_values` - IN with string literals
+- `test_in_numbers` - IN with numeric literals
+- `test_in_subquery` - IN with subquery
+- `test_exists` - EXISTS with correlated subquery
+- `test_complex_nested_expressions` - Combined CASE, cast, IN
+- `test_unary_minus` - Negative number literals
+
+### Bug Fixes
+
+- **Fixed missing MINUS operator** - The lexer was not handling `-` as a standalone token, causing it to fall through to ERROR. This made unary minus and negative numbers fail to parse.
+- **Fixed expression precedence** - Used `parse_comparison_expr()` in WHEN/THEN clauses instead of `parse_expression()` to avoid consuming keywords like WHEN, ELSE, END.
+
+---
+
+### Phase 11: Column Schema Tracking (Future)
 
 **Value**: Enable smarter LSP features (autocomplete, validation)
 
@@ -516,21 +616,31 @@ These features require significant architectural work and are not prioritized:
 
 ## Parser & LSP Status
 
-### ✅ Implemented (Phases 1-3, December 2025)
+### ✅ Implemented (Phases 1-10, December 2024)
 
+**Core Features:**
 - `smelt.ref()` parsing and validation
-- Named parameters (`filter => expr`)
+- Named parameters (`filter => expr`, `limit => 100`)
 - LSP diagnostics for undefined refs
 - Go-to-definition for model references
 - Incremental compilation via Salsa
 - Error recovery in parser
 
+**SQL Syntax (Phase 8, 10):**
+- All JOIN types (INNER, LEFT, RIGHT, FULL, CROSS)
+- ON and USING conditions
+- CASE expressions (both searched and simple forms)
+- CAST expressions (standard and PostgreSQL `::` syntax)
+- Subqueries (in SELECT and FROM clauses)
+- BETWEEN, IN, EXISTS expressions
+- Unary operators (-, NOT)
+
 ### ⏸️ Deferred
 
 - `smelt.metric()` support (awaiting metrics design)
-- JOIN syntax parsing
 - Configuration annotations (`@materialize`, etc.)
 - Column-level schema tracking
+- Additional SQL syntax (ORDER BY, LIMIT, HAVING, window functions, CTEs)
 
 ---
 

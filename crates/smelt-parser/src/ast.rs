@@ -324,10 +324,13 @@ impl Expr {
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         // Accept any node that looks like an expression
         match node.kind() {
-            EXPRESSION | BINARY_EXPR | FUNCTION_CALL => Some(Self(node)),
+            EXPRESSION | BINARY_EXPR | FUNCTION_CALL | CASE_EXPR | CAST_EXPR
+            | SUBQUERY | BETWEEN_EXPR | IN_EXPR | EXISTS_EXPR => Some(Self(node)),
             _ => {
                 // Also try to wrap the node if it contains expression-like children
-                if node.children().any(|n| matches!(n.kind(), EXPRESSION | BINARY_EXPR | FUNCTION_CALL)) {
+                if node.children().any(|n| matches!(n.kind(),
+                    EXPRESSION | BINARY_EXPR | FUNCTION_CALL | CASE_EXPR
+                    | CAST_EXPR | SUBQUERY | BETWEEN_EXPR | IN_EXPR | EXISTS_EXPR)) {
                     Some(Self(node))
                 } else {
                     None
@@ -385,6 +388,42 @@ impl Expr {
                 // Check if this node itself is a function call
                 FunctionCall::cast(self.0.clone())
             })
+    }
+
+    /// Check if this is a CASE expression
+    pub fn as_case(&self) -> Option<CaseExpr> {
+        self.0.children().find_map(CaseExpr::cast)
+            .or_else(|| CaseExpr::cast(self.0.clone()))
+    }
+
+    /// Check if this is a CAST expression
+    pub fn as_cast(&self) -> Option<CastExpr> {
+        self.0.children().find_map(CastExpr::cast)
+            .or_else(|| CastExpr::cast(self.0.clone()))
+    }
+
+    /// Check if this is a subquery
+    pub fn as_subquery(&self) -> Option<Subquery> {
+        self.0.children().find_map(Subquery::cast)
+            .or_else(|| Subquery::cast(self.0.clone()))
+    }
+
+    /// Check if this is a BETWEEN expression
+    pub fn as_between(&self) -> Option<BetweenExpr> {
+        self.0.children().find_map(BetweenExpr::cast)
+            .or_else(|| BetweenExpr::cast(self.0.clone()))
+    }
+
+    /// Check if this is an IN expression
+    pub fn as_in(&self) -> Option<InExpr> {
+        self.0.children().find_map(InExpr::cast)
+            .or_else(|| InExpr::cast(self.0.clone()))
+    }
+
+    /// Check if this is an EXISTS expression
+    pub fn as_exists(&self) -> Option<ExistsExpr> {
+        self.0.children().find_map(ExistsExpr::cast)
+            .or_else(|| ExistsExpr::cast(self.0.clone()))
     }
 }
 
@@ -647,4 +686,235 @@ pub struct Position {
 pub struct Range {
     pub start: Position,
     pub end: Position,
+}
+
+// ===== Phase 10: Expression Enhancement AST Wrappers =====
+
+/// CASE expression (CASE WHEN ... THEN ... ELSE ... END)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CaseExpr(SyntaxNode);
+
+impl CaseExpr {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == CASE_EXPR {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Get the case value expression (for simple CASE)
+    /// Returns None for searched CASE (CASE WHEN ...)
+    pub fn case_value(&self) -> Option<Expr> {
+        // The case value is the first EXPRESSION child, before any WHEN_CLAUSE
+        self.0.children()
+            .take_while(|n| n.kind() != WHEN_CLAUSE)
+            .find_map(Expr::cast)
+    }
+
+    /// Get all WHEN clauses
+    pub fn when_clauses(&self) -> impl Iterator<Item = WhenClause> + '_ {
+        self.0.children().filter_map(WhenClause::cast)
+    }
+
+    /// Get the ELSE expression if present
+    pub fn else_expr(&self) -> Option<Expr> {
+        // The ELSE expression is the last EXPRESSION child, after all WHEN clauses
+        let mut found_else = false;
+        for child in self.0.children_with_tokens() {
+            if let Some(token) = child.as_token() {
+                if token.kind() == ELSE_KW {
+                    found_else = true;
+                }
+            } else if found_else {
+                if let Some(node) = child.as_node() {
+                    if let Some(expr) = Expr::cast(node.clone()) {
+                        return Some(expr);
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+/// WHEN clause in a CASE expression
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WhenClause(SyntaxNode);
+
+impl WhenClause {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == WHEN_CLAUSE {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Get the condition expression (after WHEN)
+    pub fn condition(&self) -> Option<Expr> {
+        // First EXPRESSION child
+        self.0.children().find_map(Expr::cast)
+    }
+
+    /// Get the result expression (after THEN)
+    pub fn result(&self) -> Option<Expr> {
+        // Second EXPRESSION child
+        self.0.children().filter_map(Expr::cast).nth(1)
+    }
+}
+
+/// CAST expression (CAST(expr AS type) or expr::type)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CastExpr(SyntaxNode);
+
+impl CastExpr {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == CAST_EXPR {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Get the expression being cast
+    pub fn expression(&self) -> Option<Expr> {
+        self.0.children().find_map(Expr::cast)
+    }
+
+    /// Get the type specification
+    pub fn type_spec(&self) -> Option<TypeSpec> {
+        self.0.children().find_map(TypeSpec::cast)
+    }
+
+    /// Check if this is a PostgreSQL :: cast (vs CAST(...))
+    pub fn is_double_colon_cast(&self) -> bool {
+        self.0.children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .any(|t| t.kind() == DOUBLE_COLON)
+    }
+}
+
+/// Type specification (e.g., INTEGER, VARCHAR(255), DECIMAL(10,2))
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeSpec(SyntaxNode);
+
+impl TypeSpec {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == TYPE_SPEC {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Get the type name (e.g., "INTEGER", "VARCHAR")
+    pub fn type_name(&self) -> Option<String> {
+        self.0.children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == IDENT)
+            .map(|t| t.text().to_string())
+    }
+
+    /// Get the full text including parameters (e.g., "VARCHAR(255)")
+    pub fn full_text(&self) -> String {
+        self.0.text().to_string()
+    }
+}
+
+/// Subquery (SELECT statement in parentheses)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Subquery(SyntaxNode);
+
+impl Subquery {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == SUBQUERY {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Get the SELECT statement
+    pub fn select_stmt(&self) -> Option<SelectStmt> {
+        self.0.children().find_map(SelectStmt::cast)
+    }
+}
+
+/// BETWEEN expression (expr BETWEEN low AND high)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BetweenExpr(SyntaxNode);
+
+impl BetweenExpr {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == BETWEEN_EXPR {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Get the lower bound expression
+    pub fn lower_bound(&self) -> Option<Expr> {
+        // First EXPRESSION child
+        self.0.children().find_map(Expr::cast)
+    }
+
+    /// Get the upper bound expression
+    pub fn upper_bound(&self) -> Option<Expr> {
+        // Second EXPRESSION child
+        self.0.children().filter_map(Expr::cast).nth(1)
+    }
+}
+
+/// IN expression (expr IN (values...) or expr IN (subquery))
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InExpr(SyntaxNode);
+
+impl InExpr {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == IN_EXPR {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Check if this is a subquery IN (vs value list)
+    pub fn is_subquery(&self) -> bool {
+        self.0.children().any(|n| n.kind() == SUBQUERY)
+    }
+
+    /// Get the subquery (if this is IN (subquery))
+    pub fn subquery(&self) -> Option<Subquery> {
+        self.0.children().find_map(Subquery::cast)
+    }
+
+    /// Get the value expressions (if this is IN (value1, value2, ...))
+    pub fn values(&self) -> Vec<Expr> {
+        if self.is_subquery() {
+            Vec::new()
+        } else {
+            self.0.children().filter_map(Expr::cast).collect()
+        }
+    }
+}
+
+/// EXISTS expression (EXISTS (subquery))
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExistsExpr(SyntaxNode);
+
+impl ExistsExpr {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == EXISTS_EXPR {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Get the subquery
+    pub fn subquery(&self) -> Option<Subquery> {
+        self.0.children().find_map(Subquery::cast)
+    }
 }

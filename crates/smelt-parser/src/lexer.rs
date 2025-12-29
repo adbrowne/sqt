@@ -74,6 +74,10 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 PLUS
             }
+            '-' => {
+                self.advance();
+                MINUS
+            }
             '/' => {
                 self.advance();
                 DIVIDE
@@ -109,6 +113,11 @@ impl<'a> Lexer<'a> {
             '>' => {
                 self.advance();
                 GT
+            }
+            ':' if self.peek_char() == Some(':') => {
+                self.advance();
+                self.advance();
+                DOUBLE_COLON
             }
 
             // Strings
@@ -242,6 +251,18 @@ fn keyword_or_ident(text: &str) -> SyntaxKind {
         "CROSS" => CROSS_KW,
         "ON" => ON_KW,
         "USING" => USING_KW,
+        // Phase 10: Expression keywords
+        "CASE" => CASE_KW,
+        "WHEN" => WHEN_KW,
+        "THEN" => THEN_KW,
+        "ELSE" => ELSE_KW,
+        "END" => END_KW,
+        "CAST" => CAST_KW,
+        "BETWEEN" => BETWEEN_KW,
+        "IN" => IN_KW,
+        "EXISTS" => EXISTS_KW,
+        "ANY" => ANY_KW,
+        "SOME" => SOME_KW,
         _ => IDENT,
     }
 }
