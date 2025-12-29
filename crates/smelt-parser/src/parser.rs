@@ -296,6 +296,14 @@ impl<'a> Parser<'a> {
                 self.skip_trivia();
                 if self.at(COMMA) {
                     self.advance();
+                    self.skip_trivia();
+                    // Allow trailing comma - break if next token ends the SELECT list
+                    if self.at_any(&[
+                        FROM_KW, WHERE_KW, GROUP_KW, HAVING_KW, ORDER_KW, LIMIT_KW, EOF, INNER_KW,
+                        LEFT_KW, RIGHT_KW, FULL_KW, CROSS_KW, JOIN_KW,
+                    ]) {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -591,6 +599,11 @@ impl<'a> Parser<'a> {
             self.skip_trivia();
             if self.at(COMMA) {
                 self.advance();
+                self.skip_trivia();
+                // Allow trailing comma - break if next token ends GROUP BY
+                if self.at_any(&[HAVING_KW, ORDER_KW, LIMIT_KW, EOF]) {
+                    break;
+                }
             } else {
                 break;
             }
@@ -2250,6 +2263,64 @@ LIMIT 100
     #[test]
     fn test_filter_with_window_function() {
         let input = "SELECT SUM(amount) FILTER (WHERE status = 'active') OVER (PARTITION BY user_id) FROM events";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    // Trailing comma tests (DuckDB-style friendly SQL)
+
+    #[test]
+    fn test_trailing_comma_select() {
+        let input = "SELECT a, b, c, FROM t";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_trailing_comma_select_with_where() {
+        let input = "SELECT id, name, FROM users WHERE active";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_trailing_comma_group_by() {
+        let input = "SELECT city, COUNT(*) FROM users GROUP BY city,";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_trailing_comma_group_by_multiple() {
+        let input = "SELECT a, b, SUM(c) FROM t GROUP BY a, b,";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_trailing_comma_both_select_and_group_by() {
+        let input = "SELECT a, b, FROM t GROUP BY a, b,";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_trailing_comma_group_by_with_having() {
+        let input = "SELECT dept, COUNT(*) FROM users GROUP BY dept, HAVING COUNT(*) > 5";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_trailing_comma_group_by_with_order() {
+        let input = "SELECT city, COUNT(*) FROM users GROUP BY city, ORDER BY COUNT(*) DESC";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_trailing_comma_select_with_join() {
+        let input = "SELECT a, b, FROM t1 INNER JOIN t2 ON t1.id = t2.id";
         let parse = parse(input);
         assert_eq!(parse.errors.len(), 0);
     }

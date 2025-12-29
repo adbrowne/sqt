@@ -144,6 +144,36 @@ smelt.metric('metric_name',
 )
 ```
 
+### Trailing Commas (smelt extension)
+
+smelt allows trailing commas in SELECT and GROUP BY clauses, matching DuckDB's "friendly SQL" approach:
+
+```sql
+SELECT
+    user_id,
+    order_date,
+    amount,  -- trailing comma OK
+FROM orders
+GROUP BY
+    user_id,
+    order_date,  -- trailing comma OK
+```
+
+This simplifies adding/removing columns and produces cleaner git diffs.
+
+**Supported locations:**
+- SELECT column lists
+- GROUP BY column lists
+
+**Not supported** (following DuckDB's behavior):
+- ORDER BY clauses
+- CTEs
+- Function arguments
+
+**Industry precedent:**
+- DuckDB, BigQuery, Snowflake support trailing commas
+- PostgreSQL, MySQL, Oracle, SQL Server, and the SQL standard do not
+
 ---
 
 ## Two-Layer DSL Architecture
