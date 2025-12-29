@@ -361,6 +361,12 @@ impl<'a> Parser<'a> {
         self.start_node(TABLE_REF);
         self.skip_trivia();
 
+        // Check for LATERAL keyword (PostgreSQL)
+        if self.at(LATERAL_KW) {
+            self.advance(); // LATERAL
+            self.skip_trivia();
+        }
+
         if self.at(LPAREN) {
             // Could be a subquery
             let checkpoint = self.builder.checkpoint();
@@ -408,6 +414,43 @@ impl<'a> Parser<'a> {
             // else: simple identifier, already consumed
         } else {
             self.error("Expected table reference".to_string());
+        }
+
+        // Optional TABLESAMPLE clause (PostgreSQL)
+        self.skip_trivia();
+        if self.at(TABLESAMPLE_KW) {
+            self.start_node(TABLESAMPLE_CLAUSE);
+            self.advance(); // TABLESAMPLE
+            self.skip_trivia();
+
+            // Sampling method: BERNOULLI or SYSTEM
+            if self.at(BERNOULLI_KW) || self.at(SYSTEM_KW) {
+                self.advance();
+                self.skip_trivia();
+            }
+
+            // Percentage in parentheses
+            if self.expect(LPAREN) {
+                self.skip_trivia();
+                self.parse_expression(); // Sample percentage
+                self.skip_trivia();
+                self.expect(RPAREN);
+            }
+
+            // Optional REPEATABLE (seed)
+            self.skip_trivia();
+            if self.at(REPEATABLE_KW) {
+                self.advance(); // REPEATABLE
+                self.skip_trivia();
+                if self.expect(LPAREN) {
+                    self.skip_trivia();
+                    self.parse_expression(); // Seed value
+                    self.skip_trivia();
+                    self.expect(RPAREN);
+                }
+            }
+
+            self.finish_node(); // TABLESAMPLE_CLAUSE
         }
 
         // Optional AS alias (explicit with AS keyword or implicit)
@@ -469,9 +512,9 @@ impl<'a> Parser<'a> {
             return;
         }
 
-        // Parse table reference
+        // Parse table reference (may include LATERAL keyword)
         self.skip_trivia();
-        if !self.at(IDENT) {
+        if !self.at(IDENT) && !self.at(LATERAL_KW) && !self.at(LPAREN) {
             // Error recovery: missing table reference
             self.error("Expected table reference after JOIN".to_string());
             self.finish_node();
@@ -2110,6 +2153,49 @@ LIMIT 100
     #[test]
     fn test_distinct_on_single_expr() {
         let input = "SELECT DISTINCT ON (category) name, price FROM products";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_lateral_join() {
+        let input = "SELECT * FROM users u LEFT JOIN LATERAL (SELECT * FROM orders WHERE user_id = u.id) o ON true";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+
+        let root = parse.syntax();
+        let text = root.text().to_string();
+        assert!(text.contains("LATERAL"), "Should contain LATERAL keyword");
+    }
+
+    #[test]
+    fn test_lateral_subquery() {
+        let input = "SELECT * FROM users, LATERAL (SELECT * FROM orders WHERE user_id = users.id) o";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_tablesample_bernoulli() {
+        let input = "SELECT * FROM events TABLESAMPLE BERNOULLI (10)";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+
+        let root = parse.syntax();
+        let tablesample = root.descendants().find(|n| n.kind() == TABLESAMPLE_CLAUSE);
+        assert!(tablesample.is_some(), "TABLESAMPLE clause should be present");
+    }
+
+    #[test]
+    fn test_tablesample_system_with_repeatable() {
+        let input = "SELECT * FROM large_table TABLESAMPLE SYSTEM (5) REPEATABLE (123)";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_tablesample_with_alias() {
+        let input = "SELECT * FROM events TABLESAMPLE BERNOULLI (1) AS sample_data";
         let parse = parse(input);
         assert_eq!(parse.errors.len(), 0);
     }
