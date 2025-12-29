@@ -297,6 +297,8 @@ fn keyword_or_ident(text: &str) -> SyntaxKind {
         "BERNOULLI" => BERNOULLI_KW,
         "SYSTEM" => SYSTEM_KW,
         "REPEATABLE" => REPEATABLE_KW,
+        // Phase 15: Aggregate function keywords
+        "FILTER" => FILTER_KW,
         _ => IDENT,
     }
 }

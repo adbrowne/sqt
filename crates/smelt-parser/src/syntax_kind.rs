@@ -70,6 +70,8 @@ pub enum SyntaxKind {
     BERNOULLI_KW,
     SYSTEM_KW,
     REPEATABLE_KW,
+    // Phase 15: Aggregate function keywords
+    FILTER_KW,
 
     // Operators & punctuation
     LPAREN,   // (
@@ -138,6 +140,8 @@ pub enum SyntaxKind {
     // Phase 14: PostgreSQL-specific nodes
     DISTINCT_ON_CLAUSE,  // DISTINCT ON (expr, expr)
     TABLESAMPLE_CLAUSE,  // TABLESAMPLE method (percentage) REPEATABLE (seed)
+    // Phase 15: Aggregate function nodes
+    FILTER_CLAUSE,       // FILTER (WHERE condition)
 
     // Error handling
     ERROR, // Invalid syntax
@@ -163,6 +167,7 @@ impl SyntaxKind {
             | UNBOUNDED_KW | PRECEDING_KW | FOLLOWING_KW | CURRENT_KW | ROW_KW
             | WITH_KW | RECURSIVE_KW | UNION_KW
             | LATERAL_KW | TABLESAMPLE_KW | BERNOULLI_KW | SYSTEM_KW | REPEATABLE_KW
+            | FILTER_KW
         )
     }
 

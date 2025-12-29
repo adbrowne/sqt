@@ -896,6 +896,7 @@ impl<'a> Parser<'a> {
                 // Simple function call: func()
                 self.start_node_at(checkpoint, FUNCTION_CALL);
                 self.parse_arg_list();
+                self.parse_filter_clause_if_present(); // PostgreSQL FILTER clause
                 self.finish_node();
 
                 // Check for OVER clause (window function)
@@ -914,6 +915,7 @@ impl<'a> Parser<'a> {
                     // Namespaced function call: smelt.ref()
                     self.start_node_at(checkpoint, FUNCTION_CALL);
                     self.parse_arg_list();
+                    self.parse_filter_clause_if_present(); // PostgreSQL FILTER clause
                     self.finish_node();
 
                     // Check for OVER clause (window function)
@@ -1127,14 +1129,36 @@ impl<'a> Parser<'a> {
         self.finish_node();
     }
 
+    /// Parse optional FILTER clause for aggregate functions (PostgreSQL)
+    /// FILTER (WHERE condition)
+    fn parse_filter_clause_if_present(&mut self) {
+        self.skip_trivia();
+        if self.at(FILTER_KW) {
+            self.start_node(FILTER_CLAUSE);
+            self.advance(); // FILTER
+            self.skip_trivia();
+            if self.expect(LPAREN) {
+                self.skip_trivia();
+                if self.expect(WHERE_KW) {
+                    self.skip_trivia();
+                    self.parse_expression(); // Filter condition
+                    self.skip_trivia();
+                }
+                self.expect(RPAREN);
+            }
+            self.finish_node(); // FILTER_CLAUSE
+        }
+    }
+
     fn parse_argument(&mut self) {
         self.skip_trivia();
 
         // Check for named parameter: IDENT => expression
-        if self.at(IDENT) {
+        // Allow keywords to be used as parameter names (e.g., filter => ...)
+        if self.at(IDENT) || self.current().is_keyword() {
             // Look ahead to check for ARROW
             let checkpoint = self.builder.checkpoint();
-            self.advance(); // consume IDENT
+            self.advance(); // consume IDENT or keyword
             self.skip_trivia();
 
             if self.at(ARROW) {
@@ -1154,6 +1178,7 @@ impl<'a> Parser<'a> {
                     // Function call - wrap in FUNCTION_CALL
                     self.start_node_at(checkpoint, FUNCTION_CALL);
                     self.parse_arg_list();
+                    self.parse_filter_clause_if_present(); // PostgreSQL FILTER clause
                     self.finish_node();
                 } else if self.at(DOT) {
                     // Qualified name or namespaced function
@@ -1166,6 +1191,7 @@ impl<'a> Parser<'a> {
                         // Namespaced function call
                         self.start_node_at(checkpoint, FUNCTION_CALL);
                         self.parse_arg_list();
+                        self.parse_filter_clause_if_present(); // PostgreSQL FILTER clause
                         self.finish_node();
                     }
                 }
@@ -2196,6 +2222,33 @@ LIMIT 100
     #[test]
     fn test_tablesample_with_alias() {
         let input = "SELECT * FROM events TABLESAMPLE BERNOULLI (1) AS sample_data";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    // Phase 15: Aggregate function enhancements
+
+    #[test]
+    fn test_filter_clause() {
+        let input = "SELECT COUNT(*) FILTER (WHERE status = 'active') FROM users";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+
+        let root = parse.syntax();
+        let filter = root.descendants().find(|n| n.kind() == FILTER_CLAUSE);
+        assert!(filter.is_some(), "FILTER clause should be present");
+    }
+
+    #[test]
+    fn test_multiple_aggregates_with_filter() {
+        let input = "SELECT SUM(amount) FILTER (WHERE status = 'completed'), COUNT(*) FILTER (WHERE active = true) FROM orders";
+        let parse = parse(input);
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_with_window_function() {
+        let input = "SELECT SUM(amount) FILTER (WHERE status = 'active') OVER (PARTITION BY user_id) FROM events";
         let parse = parse(input);
         assert_eq!(parse.errors.len(), 0);
     }
