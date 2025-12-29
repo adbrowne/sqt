@@ -1011,29 +1011,150 @@ Comprehensive testing infrastructure to ensure parser correctness and robustness
 3. Error recovery testing (parser never panics)
 4. Round-trip preservation (valid SQL survives parse → print → parse)
 
-### Future Work (Deferred)
+#### Phase 4: CI Integration (~200 lines)
+**Files**: `.github/workflows/test.yml`, `.github/workflows/fuzz.yml`, `.github/CI.md`
 
-**Phase 4: CI Integration** (not implemented):
-- GitHub Actions workflow for nightly fuzzing
-- Coverage reporting
-- Property tests with 1000 cases on merge to main
-- Performance benchmarks
+**Completed**: December 29, 2024
 
-**Effort for Phase 4**: 1-2 days
+- **Main test workflow** (`test.yml`):
+  - Runs on push to main/feature branches and PRs
+  - Formatting check with `cargo fmt`
+  - Linting with `cargo clippy -D warnings`
+  - Build all targets
+  - Unit tests (`cargo test --lib`)
+  - Property-based tests (quick mode: 100 cases)
+  - Fuzz build verification
+  - Aggressive caching for faster CI (~3-5 minutes total)
+
+- **Fuzzing workflow** (`fuzz.yml`):
+  - Pull requests: Quick 60s per target
+  - Nightly: Thorough 600s per target at 2 AM UTC
+  - Manual dispatch with custom duration
+  - Matrix strategy (parallel execution)
+  - Automatic crash artifact upload
+  - Fails CI if crashes found
+
+- **Documentation** (`.github/CI.md`):
+  - Workflow descriptions with triggers and duration
+  - Local reproduction commands
+  - Debugging guides for CI failures
+  - Best practices for contributors
+
+**Caching Strategy**:
+- Cargo registry, git index, build artifacts
+- Invalidated when Cargo.lock changes
+- Reduces CI time from ~10min to ~3min
+
+### Future Enhancements (Not Implemented)
+
+**Coverage reporting**:
+- Integrate codecov or similar
+- Track coverage trends over time
+- Fail CI if coverage drops below threshold
+
+**Performance benchmarks**:
+- Criterion benchmarks for parser
+- Detect performance regressions in CI
+- Track parser speed over time
 
 ---
 
-### Phase 14: Column Schema Tracking (Future)
+## ✅ PostgreSQL-Specific Features (Phases 14-15, COMPLETED)
 
-**Value**: Enable smarter LSP features (autocomplete, validation)
+**Completed**: December 29, 2024
+
+Implemented PostgreSQL-specific SQL syntax extensions to expand parser capabilities:
+
+### Phase 14: PostgreSQL Extended Syntax (~150 lines)
+
+**Features implemented**:
+
+1. **DISTINCT ON (expr, expr)** - Select first row per group
+   ```sql
+   SELECT DISTINCT ON (user_id) * FROM events ORDER BY user_id, created_at DESC
+   ```
+   - Alternative to window functions for deduplication
+   - Common in PostgreSQL for "top N per group" queries
+   - Requires ORDER BY to be deterministic
+
+2. **LATERAL joins** - Correlated subqueries in FROM clause
+   ```sql
+   FROM users u, LATERAL (SELECT * FROM orders WHERE user_id = u.id) o
+   ```
+   - Enables subquery to reference columns from preceding table references
+   - Powerful for complex join logic
+   - Parsed as modifier on table references
+
+3. **TABLESAMPLE** - Table sampling syntax
+   ```sql
+   FROM events TABLESAMPLE BERNOULLI (10) REPEATABLE (seed)
+   ```
+   - Sampling methods: BERNOULLI (row-level) or SYSTEM (block-level)
+   - Optional REPEATABLE for deterministic sampling
+   - Useful for testing on large datasets
+
+**Implementation**:
+- 5 new keywords: LATERAL, TABLESAMPLE, BERNOULLI, SYSTEM, REPEATABLE
+- 2 new composite nodes: DISTINCT_ON_CLAUSE, TABLESAMPLE_CLAUSE
+- Updated SELECT parsing for DISTINCT ON
+- Updated JOIN parsing for LATERAL keyword
+- Updated table reference parsing for TABLESAMPLE
+- 7 new parser tests
+
+### Phase 15: Aggregate Function Enhancements (~80 lines)
+
+**Features implemented**:
+
+1. **FILTER (WHERE condition)** - Conditional aggregation
+   ```sql
+   SELECT
+     COUNT(*) as total,
+     COUNT(*) FILTER (WHERE status = 'completed') as completed
+   FROM orders
+   ```
+   - Alternative to CASE-based conditional aggregation
+   - Cleaner syntax than `SUM(CASE WHEN ... THEN 1 ELSE 0 END)`
+   - Applies to any aggregate function
+
+**Implementation**:
+- 1 new keyword: FILTER
+- 1 new composite node: FILTER_CLAUSE
+- Updated function call parsing to detect FILTER after arguments
+- Critical fix: Allow keywords as named parameter names (e.g., `filter => value`)
+- 3 new parser tests
+
+**Key Design Decision**:
+- Modified `parse_argument()` to allow keywords as parameter identifiers
+- Prevents `FILTER` keyword from breaking `filter => value` in smelt.ref() calls
+- Uses lookahead for ARROW (`=>`) to distinguish keyword usage from named parameters
+
+**Test Coverage**:
+- 10 new unit tests for PostgreSQL features
+- All 88 existing tests still passing
+- Property tests updated to include new syntax
+
+---
+
+### Column Schema Tracking (Future)
+
+**Goal**: Enable smarter LSP features through column-level validation
+
+**Value**:
+- Autocomplete for column names in SELECT, WHERE, GROUP BY
+- Real-time validation of column references
+- Type inference from SELECT expressions
+- Better error messages for typos and invalid references
 
 **Work**:
-- Track column schemas in smelt-db
-- Infer output columns from SELECT
-- Validate column references
-- LSP autocomplete for column names
+- Track column schemas in smelt-db queries
+- Infer output columns from SELECT clause
+- Validate column references against available schemas
+- LSP autocomplete integration for column names
+- Handle star (*) expansion and aliases
 
-**Effort**: Medium-High
+**Effort**: Medium-High (3-5 days)
+
+**Dependencies**: Requires schema metadata from database or model definitions
 
 ---
 
@@ -1082,7 +1203,7 @@ These features require significant architectural work and are not prioritized:
 - Incremental compilation via Salsa
 - Error recovery in parser
 
-**SQL Syntax (Phases 8, 10, 11, 12, 13):**
+**SQL Syntax (Phases 8, 10-15):**
 - All JOIN types (INNER, LEFT, RIGHT, FULL, CROSS)
 - ON and USING conditions
 - CASE expressions (both searched and simple forms)
@@ -1098,6 +1219,11 @@ These features require significant architectural work and are not prioritized:
 - Window functions (OVER clause with PARTITION BY, ORDER BY, frame specs)
 - Common Table Expressions (WITH clause, RECURSIVE)
 - UNION and UNION ALL set operations
+- **PostgreSQL-specific features (Phases 14-15)**:
+  - DISTINCT ON (expr, ...) - Select first row per group
+  - LATERAL joins - Correlated subqueries in FROM clause
+  - TABLESAMPLE - Table sampling with BERNOULLI/SYSTEM and REPEATABLE
+  - FILTER (WHERE condition) - Conditional aggregation
 
 ### ⏸️ Deferred
 
