@@ -275,6 +275,22 @@ fn keyword_or_ident(text: &str) -> SyntaxKind {
         "NULLS" => NULLS_KW,
         "FIRST" => FIRST_KW,
         "LAST" => LAST_KW,
+        // Phase 12: Window function keywords
+        "OVER" => OVER_KW,
+        "PARTITION" => PARTITION_KW,
+        "WINDOW" => WINDOW_KW,
+        "ROWS" => ROWS_KW,
+        "RANGE" => RANGE_KW,
+        "GROUPS" => GROUPS_KW,
+        "UNBOUNDED" => UNBOUNDED_KW,
+        "PRECEDING" => PRECEDING_KW,
+        "FOLLOWING" => FOLLOWING_KW,
+        "CURRENT" => CURRENT_KW,
+        "ROW" => ROW_KW,
+        // Phase 13: CTE keywords
+        "WITH" => WITH_KW,
+        "RECURSIVE" => RECURSIVE_KW,
+        "UNION" => UNION_KW,
         _ => IDENT,
     }
 }

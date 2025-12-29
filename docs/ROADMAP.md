@@ -678,7 +678,239 @@ Cargo clippy passes with no warnings.
 
 ---
 
-### Phase 12: Column Schema Tracking (Future)
+## ✅ Phase 12: Window Functions (COMPLETED)
+
+**Completed**: December 29, 2024
+
+### What Was Implemented
+
+- **Window function syntax** - Full OVER clause support
+  - `OVER (ORDER BY col)` - Simple window ordering
+  - `OVER (PARTITION BY col ORDER BY col)` - Partitioned windows
+  - `OVER window_name` - Named window references (parsed, not yet implemented in executor)
+
+- **PARTITION BY clause** - Window partitioning
+  - Single column: `PARTITION BY user_id`
+  - Multiple columns: `PARTITION BY user_id, category`
+  - Full expression support (same as GROUP BY)
+
+- **Window frames** - Frame specification for aggregates
+  - Frame units: `ROWS`, `RANGE`, `GROUPS`
+  - Frame bounds:
+    - `UNBOUNDED PRECEDING` / `UNBOUNDED FOLLOWING`
+    - `CURRENT ROW`
+    - `N PRECEDING` / `N FOLLOWING` (numeric offsets)
+  - Frame extents:
+    - Single bound: `ROWS UNBOUNDED PRECEDING`
+    - Between bounds: `ROWS BETWEEN 3 PRECEDING AND CURRENT ROW`
+
+- **Common window functions** - All standard SQL window functions
+  - Row numbering: `ROW_NUMBER()`, `RANK()`, `DENSE_RANK()`
+  - Offset functions: `LAG()`, `LEAD()`
+  - Aggregates: `SUM()`, `AVG()`, `COUNT()`, etc. with OVER clause
+  - All functions work with PARTITION BY, ORDER BY, and frame specifications
+
+### Implementation Details
+
+**Lexer updates** (`crates/smelt-parser/src/lexer.rs`):
+- Added 11 new keywords: OVER, PARTITION, WINDOW, ROWS, RANGE, GROUPS, UNBOUNDED, PRECEDING, FOLLOWING, CURRENT, ROW
+- All keywords recognized case-insensitively
+
+**Parser enhancements** (`crates/smelt-parser/src/parser.rs`):
+- `parse_window_spec()` - OVER clause with inline or named window
+- `parse_partition_by()` - Comma-separated partition expressions
+- `parse_window_frame()` - Frame unit and extent specification
+- `parse_frame_bound()` - Individual frame boundary parsing
+- Updated `parse_primary_expr()` to detect OVER after function calls
+- Window specs attached to function calls in both simple and namespaced forms
+
+**AST wrappers** (`crates/smelt-parser/src/ast.rs`):
+- `WindowSpec` - with `partition_by()`, `order_by()`, `frame()`, `window_name()` methods
+- `PartitionByClause` - with `expressions()` iterator
+- `WindowFrame` - with `unit()`, `bounds()` methods
+- `FrameUnit` enum (Rows, Range, Groups)
+- `FrameBound` - with `text()` method for bound representation
+- Updated `Expr` with `window_spec()` method
+
+**SyntaxKind updates** (`crates/smelt-parser/src/syntax_kind.rs`):
+- Added 11 new keyword tokens
+- Added 4 new composite node types: WINDOW_SPEC, PARTITION_BY_CLAUSE, WINDOW_FRAME, FRAME_BOUND
+- Updated `is_keyword()` to include all new keywords
+
+### Test Results
+
+All 58 parser tests passing, including 15 new tests for Phase 12:
+- `test_window_function_basic` - ROW_NUMBER() with ORDER BY
+- `test_window_function_partition` - SUM with PARTITION BY and ORDER BY
+- `test_window_frame_rows` - ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
+- `test_window_frame_unbounded` - ROWS UNBOUNDED PRECEDING
+- `test_window_frame_range` - RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+- `test_window_frame_groups` - GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+- `test_multiple_window_functions` - Multiple window functions in same query
+- `test_window_function_with_frame_offset` - Numeric offset bounds
+- `test_window_function_partition_multiple_columns` - Multi-column partitioning
+- `test_window_function_range_unbounded_following` - UNBOUNDED FOLLOWING
+- `test_window_function_with_aggregate` - AVG as window function
+- `test_window_function_rank` - RANK() function
+- `test_window_function_dense_rank` - DENSE_RANK() function
+- `test_window_function_lag` - LAG() offset function
+- `test_window_function_lead` - LEAD() offset function
+
+Cargo clippy passes with no warnings.
+
+### Design Decisions
+
+**Window specs as separate nodes**:
+- WINDOW_SPEC is a child of the expression containing the function call
+- This allows easy detection of window functions via `expr.window_spec()`
+- Preserves accurate position tracking for LSP features
+
+**Frame specification flexibility**:
+- Parser accepts all three frame units (ROWS, RANGE, GROUPS)
+- Single bound form defaults to `CURRENT ROW` as upper bound
+- Semantic validation of frame specs deferred to future work
+
+**Named window references**:
+- Parser accepts `OVER window_name` syntax
+- Named windows can reference a WINDOW clause (not yet implemented)
+- Foundation for future WINDOW clause support
+
+**Reuse of ORDER BY parsing**:
+- Window ORDER BY uses same `parse_order_by_clause()` as statement-level
+- Enables consistent handling of ASC/DESC and NULLS FIRST/LAST
+- Code reuse reduces parser complexity
+
+### Future Work
+
+**Semantic validation** (not implemented):
+- Validate frame bounds make sense (start before end)
+- Check that RANGE/GROUPS have ORDER BY
+- Verify window function usage (not in WHERE, etc.)
+
+**WINDOW clause** (not implemented):
+- Statement-level `WINDOW name AS (...)` definitions
+- Window reference resolution in OVER clauses
+- Window inheritance and extension
+
+**Execution support** (not implemented):
+- Actual window function execution in backends
+- Frame calculation algorithms
+- Optimization of multiple windows over same partition
+
+---
+
+## ✅ Phase 13: Common Table Expressions (CTEs) (COMPLETED)
+
+**Completed**: December 29, 2024
+
+### What Was Implemented
+
+- **WITH clause** - Full CTE support
+  - `WITH cte_name AS (SELECT ...) SELECT ... FROM cte_name`
+  - Multiple CTEs: `WITH cte1 AS (...), cte2 AS (...) SELECT ...`
+  - Optional column list: `WITH summary(dept, total) AS (...)`
+  - Nested CTEs: CTEs can have their own WITH clauses
+
+- **RECURSIVE CTEs** - Recursive query support
+  - `WITH RECURSIVE tree AS (SELECT ... UNION ALL SELECT ...) SELECT ...`
+  - Base case + recursive case pattern
+  - Proper UNION support for recursive queries
+
+- **UNION clause** - Set operations
+  - `SELECT ... UNION SELECT ...` - Remove duplicates
+  - `SELECT ... UNION ALL SELECT ...` - Keep all rows
+  - Required for recursive CTEs
+
+### Implementation Details
+
+**Lexer updates** (`crates/smelt-parser/src/lexer.rs`):
+- Added 3 new keywords: WITH, RECURSIVE, UNION
+- All keywords recognized case-insensitively
+
+**Parser enhancements** (`crates/smelt-parser/src/parser.rs`):
+- `parse_with_clause()` - WITH keyword, optional RECURSIVE, comma-separated CTEs
+- `parse_cte()` - CTE name, optional column list, AS (query)
+- Updated `parse_file()` to accept WITH as start of SELECT statement
+- Updated `parse_select_stmt()` to parse WITH clause before SELECT keyword
+- Added UNION support after LIMIT clause with optional ALL keyword
+- Column list parsing with lookahead to distinguish from query parentheses
+- Recursive calls support nested CTEs (WITH inside WITH)
+
+**AST wrappers** (`crates/smelt-parser/src/ast.rs`):
+- `WithClause` - with `is_recursive()`, `ctes()` methods
+- `Cte` - with `name()`, `query()`, `column_names()` methods
+- Updated `SelectStmt` with `with_clause()` method
+- Column list extraction from CTE definition
+
+**SyntaxKind updates** (`crates/smelt-parser/src/syntax_kind.rs`):
+- Added 3 new keyword tokens: WITH_KW, RECURSIVE_KW, UNION_KW
+- Added 2 new composite node types: WITH_CLAUSE, CTE
+- Updated `is_keyword()` to include all new keywords
+
+### Test Results
+
+All 66 parser tests passing, including 8 new tests for Phase 13:
+- `test_cte_basic` - Simple CTE with single query
+- `test_cte_multiple` - Multiple CTEs separated by commas
+- `test_cte_recursive` - Recursive CTE with UNION ALL
+- `test_cte_nested` - CTE containing another WITH clause
+- `test_cte_with_window_function` - CTE using window functions
+- `test_cte_with_column_list` - CTE with explicit column names
+- `test_union_basic` - Simple UNION query
+- `test_union_all` - UNION ALL preserving duplicates
+
+Cargo clippy passes with no warnings.
+
+### Design Decisions
+
+**WITH clause before SELECT**:
+- Follows SQL standard ordering
+- WITH must come first, before SELECT keyword
+- Enables clean separation of CTEs from main query
+
+**Column list as optional**:
+- Parser accepts both `WITH name AS (...)` and `WITH name(col1, col2) AS (...)`
+- Column list parsing uses lookahead to avoid ambiguity with query parentheses
+- Column names extracted via `column_names()` method for future validation
+
+**UNION support added**:
+- Required for recursive CTEs (base case UNION ALL recursive case)
+- Supports both UNION (deduplicate) and UNION ALL (keep duplicates)
+- Positioned after LIMIT clause, allowing multiple SELECT statements to be combined
+- Recursive parsing allows chaining: `SELECT ... UNION SELECT ... UNION SELECT ...`
+
+**Nested CTEs allowed**:
+- CTEs can contain WITH clauses themselves
+- Recursive `parse_select_stmt()` call handles nesting naturally
+- Enables complex query organization and modularity
+
+**Subquery reuse**:
+- CTE query uses existing SUBQUERY node type
+- Consistent with subqueries in FROM and expressions
+- Simplifies AST structure and parsing logic
+
+### Future Work
+
+**Semantic validation** (not implemented):
+- Validate CTE references exist and are in scope
+- Check recursive CTE structure (base case + recursive case)
+- Verify column list matches query column count
+- Detect circular references in non-recursive CTEs
+
+**LSP features** (not implemented):
+- Go-to-definition for CTE references
+- Autocomplete CTE names in FROM clauses
+- Highlight CTE definitions and usages
+- Diagnostics for undefined CTE references
+
+**Execution support** (not implemented):
+- CTE materialization in backends (inline vs materialized)
+- Recursive CTE execution (iteration until fixpoint)
+- Optimization opportunities (CTE inlining, hoisting)
+
+---
+
+### Phase 14: Column Schema Tracking (Future)
 
 **Value**: Enable smarter LSP features (autocomplete, validation)
 
@@ -727,7 +959,7 @@ These features require significant architectural work and are not prioritized:
 
 ## Parser & LSP Status
 
-### ✅ Implemented (Phases 1-11, December 2024)
+### ✅ Implemented (Phases 1-13, December 2024)
 
 **Core Features:**
 - `smelt.ref()` parsing and validation
@@ -737,7 +969,7 @@ These features require significant architectural work and are not prioritized:
 - Incremental compilation via Salsa
 - Error recovery in parser
 
-**SQL Syntax (Phases 8, 10, 11):**
+**SQL Syntax (Phases 8, 10, 11, 12, 13):**
 - All JOIN types (INNER, LEFT, RIGHT, FULL, CROSS)
 - ON and USING conditions
 - CASE expressions (both searched and simple forms)
@@ -750,13 +982,16 @@ These features require significant architectural work and are not prioritized:
 - HAVING clause for post-aggregation filtering
 - DISTINCT and ALL keywords
 - SELECT without FROM (constant expressions)
+- Window functions (OVER clause with PARTITION BY, ORDER BY, frame specs)
+- Common Table Expressions (WITH clause, RECURSIVE)
+- UNION and UNION ALL set operations
 
 ### ⏸️ Deferred
 
 - `smelt.metric()` support (awaiting metrics design)
 - Configuration annotations (`@materialize`, etc.)
 - Column-level schema tracking
-- Additional SQL syntax (window functions, CTEs, UNION/INTERSECT/EXCEPT)
+- Additional SQL syntax (INTERSECT/EXCEPT, INSERT/UPDATE/DELETE, CREATE TABLE/VIEW)
 
 ---
 
