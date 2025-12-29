@@ -71,7 +71,26 @@ cargo +nightly fuzz run parse_never_panics -- -max_total_time=3600 -timeout=10
 
 ## CI Integration
 
-Fuzzing is run nightly in CI for 10 minutes per target. See `.github/workflows/fuzz.yml` (if configured).
+Fuzzing runs automatically in GitHub Actions:
+
+**Pull Requests**: Quick 60-second run per target to catch obvious issues
+**Nightly**: Thorough 10-minute run per target at 2 AM UTC
+**Manual**: Trigger via workflow_dispatch with custom duration
+
+**Workflow**: `.github/workflows/fuzz.yml`
+
+The workflow:
+- Runs both fuzz targets in parallel
+- Caches builds for faster execution
+- Uploads crash artifacts if found
+- Fails CI if crashes are discovered
+
+**Reproducing CI crashes**:
+```bash
+# Download the crash artifact from GitHub Actions
+# Then reproduce locally:
+cargo +nightly fuzz run <target_name> <crash_file>
+```
 
 ## Notes
 

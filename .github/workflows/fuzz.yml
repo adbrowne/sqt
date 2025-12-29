@@ -1,0 +1,135 @@
+name: Fuzzing
+
+on:
+  # Quick fuzz run on PRs
+  pull_request:
+    paths:
+      - 'crates/smelt-parser/**'
+      - '.github/workflows/fuzz.yml'
+  
+  # Thorough nightly fuzzing
+  schedule:
+    # Run at 2 AM UTC every day
+    - cron: '0 2 * * *'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzzing duration in seconds per target'
+        required: false
+        default: '300'
+
+jobs:
+  fuzz:
+    name: Fuzz Testing
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - parse_never_panics
+          - round_trip
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+      
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Cache fuzz build
+        uses: actions/cache@v4
+        with:
+          path: crates/smelt-parser/fuzz/target
+          key: ${{ runner.os }}-fuzz-target-${{ hashFiles('crates/smelt-parser/fuzz/Cargo.lock') }}
+      
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      
+      - name: Determine fuzzing duration
+        id: duration
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "seconds=60" >> $GITHUB_OUTPUT
+            echo "Running quick fuzz for PRs (60s per target)"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "seconds=${{ github.event.inputs.duration }}" >> $GITHUB_OUTPUT
+            echo "Running manual fuzz (${{ github.event.inputs.duration }}s per target)"
+          else
+            echo "seconds=600" >> $GITHUB_OUTPUT
+            echo "Running nightly fuzz (600s per target)"
+          fi
+      
+      - name: Run fuzz target
+        run: |
+          cd crates/smelt-parser
+          cargo +nightly fuzz run ${{ matrix.target }} -- \
+            -max_total_time=${{ steps.duration.outputs.seconds }} \
+            -verbosity=1 \
+            || true
+        continue-on-error: true
+      
+      - name: Check for crashes
+        id: check_crashes
+        run: |
+          CRASHES=$(find crates/smelt-parser/fuzz/artifacts/${{ matrix.target }} -name 'crash-*' -o -name 'leak-*' -o -name 'timeout-*' 2>/dev/null | wc -l)
+          echo "count=$CRASHES" >> $GITHUB_OUTPUT
+          if [ $CRASHES -gt 0 ]; then
+            echo "::warning::Found $CRASHES crash(es) in ${{ matrix.target }}"
+            echo "has_crashes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_crashes=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Upload crash artifacts
+        if: steps.check_crashes.outputs.has_crashes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ matrix.target }}
+          path: crates/smelt-parser/fuzz/artifacts/${{ matrix.target }}/crash-*
+          if-no-files-found: ignore
+      
+      - name: Upload leak artifacts
+        if: steps.check_crashes.outputs.has_crashes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-leaks-${{ matrix.target }}
+          path: crates/smelt-parser/fuzz/artifacts/${{ matrix.target }}/leak-*
+          if-no-files-found: ignore
+      
+      - name: Fail if crashes found
+        if: steps.check_crashes.outputs.has_crashes == 'true'
+        run: |
+          echo "::error::Fuzzing found crashes in ${{ matrix.target }}"
+          echo "Download artifacts to reproduce: cargo +nightly fuzz run ${{ matrix.target }} <crash_file>"
+          exit 1
+  
+  fuzz-summary:
+    name: Fuzzing Summary
+    runs-on: ubuntu-latest
+    needs: fuzz
+    if: always()
+    
+    steps:
+      - name: Check fuzzing results
+        run: |
+          if [ "${{ needs.fuzz.result }}" = "failure" ]; then
+            echo "::error::Fuzzing found crashes! Check the fuzz job artifacts."
+            exit 1
+          else
+            echo "✅ All fuzz targets completed successfully"
+          fi
