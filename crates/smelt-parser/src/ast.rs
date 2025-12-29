@@ -42,6 +42,10 @@ impl SelectStmt {
         }
     }
 
+    pub fn with_clause(&self) -> Option<WithClause> {
+        self.0.children().find_map(WithClause::cast)
+    }
+
     pub fn select_list(&self) -> Option<SelectList> {
         self.0.children().find_map(SelectList::cast)
     }
@@ -443,6 +447,11 @@ impl Expr {
     pub fn as_exists(&self) -> Option<ExistsExpr> {
         self.0.children().find_map(ExistsExpr::cast)
             .or_else(|| ExistsExpr::cast(self.0.clone()))
+    }
+
+    /// Check if this expression has a window specification (OVER clause)
+    pub fn window_spec(&self) -> Option<WindowSpec> {
+        self.0.children().find_map(WindowSpec::cast)
     }
 }
 
@@ -1087,5 +1096,199 @@ impl LimitClause {
             }
         }
         None
+    }
+}
+
+// ===== Phase 12: Window Function AST Wrappers =====
+
+/// Window specification (OVER clause)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WindowSpec(SyntaxNode);
+
+impl WindowSpec {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == WINDOW_SPEC {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    pub fn partition_by(&self) -> Option<PartitionByClause> {
+        self.0.children().find_map(PartitionByClause::cast)
+    }
+
+    pub fn order_by(&self) -> Option<OrderByClause> {
+        self.0.children().find_map(OrderByClause::cast)
+    }
+
+    pub fn frame(&self) -> Option<WindowFrame> {
+        self.0.children().find_map(WindowFrame::cast)
+    }
+
+    /// Get named window reference if this is OVER window_name
+    pub fn window_name(&self) -> Option<String> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == IDENT)
+            .map(|t| t.text().to_string())
+    }
+}
+
+/// PARTITION BY clause
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PartitionByClause(SyntaxNode);
+
+impl PartitionByClause {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == PARTITION_BY_CLAUSE {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    pub fn expressions(&self) -> impl Iterator<Item = Expr> + '_ {
+        self.0.children().filter_map(Expr::cast)
+    }
+}
+
+/// Window frame specification
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WindowFrame(SyntaxNode);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameUnit {
+    Rows,
+    Range,
+    Groups,
+}
+
+impl WindowFrame {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == WINDOW_FRAME {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    pub fn unit(&self) -> Option<FrameUnit> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find_map(|t| match t.kind() {
+                ROWS_KW => Some(FrameUnit::Rows),
+                RANGE_KW => Some(FrameUnit::Range),
+                GROUPS_KW => Some(FrameUnit::Groups),
+                _ => None,
+            })
+    }
+
+    pub fn bounds(&self) -> Vec<FrameBound> {
+        self.0.children().filter_map(FrameBound::cast).collect()
+    }
+}
+
+/// Frame bound
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FrameBound(SyntaxNode);
+
+impl FrameBound {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == FRAME_BOUND {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    pub fn text(&self) -> String {
+        self.0.text().to_string()
+    }
+}
+
+// ===== Phase 13: Common Table Expressions (CTEs) =====
+
+/// WITH clause (CTEs)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WithClause(SyntaxNode);
+
+impl WithClause {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == WITH_CLAUSE {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Check if this is a RECURSIVE CTE
+    pub fn is_recursive(&self) -> bool {
+        self.0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .any(|t| t.kind() == RECURSIVE_KW)
+    }
+
+    /// Get all CTEs in this WITH clause
+    pub fn ctes(&self) -> impl Iterator<Item = Cte> + '_ {
+        self.0.children().filter_map(Cte::cast)
+    }
+}
+
+/// Common Table Expression (single CTE in a WITH clause)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Cte(SyntaxNode);
+
+impl Cte {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == CTE {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    /// Get the CTE name
+    pub fn name(&self) -> Option<String> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == IDENT)
+            .map(|t| t.text().to_string())
+    }
+
+    /// Get the query (SELECT statement)
+    pub fn query(&self) -> Option<Subquery> {
+        self.0.children().find_map(Subquery::cast)
+    }
+
+    /// Get the column names from the optional column list
+    pub fn column_names(&self) -> Vec<String> {
+        // Extract column names between first LPAREN and RPAREN (before AS)
+        let mut in_column_list = false;
+        let mut found_as = false;
+        let mut columns = Vec::new();
+
+        for child in self.0.children_with_tokens() {
+            if let Some(token) = child.as_token() {
+                match token.kind() {
+                    LPAREN if !found_as => in_column_list = true,
+                    RPAREN if in_column_list && !found_as => in_column_list = false,
+                    AS_KW => {
+                        found_as = true;
+                        in_column_list = false;
+                    }
+                    IDENT if in_column_list => {
+                        columns.push(token.text().to_string());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        columns
     }
 }

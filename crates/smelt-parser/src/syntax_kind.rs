@@ -48,6 +48,22 @@ pub enum SyntaxKind {
     NULLS_KW,
     FIRST_KW,
     LAST_KW,
+    // Phase 12: Window function keywords
+    OVER_KW,
+    PARTITION_KW,
+    WINDOW_KW,
+    ROWS_KW,
+    RANGE_KW,
+    GROUPS_KW,
+    UNBOUNDED_KW,
+    PRECEDING_KW,
+    FOLLOWING_KW,
+    CURRENT_KW,
+    ROW_KW,
+    // Phase 13: CTE keywords
+    WITH_KW,
+    RECURSIVE_KW,
+    UNION_KW,
 
     // Operators & punctuation
     LPAREN,   // (
@@ -105,6 +121,14 @@ pub enum SyntaxKind {
     ORDER_BY_CLAUSE, // ORDER BY column1, column2
     ORDER_BY_ITEM,   // Single ORDER BY item with direction and null ordering
     LIMIT_CLAUSE,    // LIMIT n OFFSET m
+    // Phase 12: Window function nodes
+    WINDOW_SPEC,         // OVER clause specification
+    PARTITION_BY_CLAUSE, // PARTITION BY expr, expr
+    WINDOW_FRAME,        // ROWS/RANGE/GROUPS specification
+    FRAME_BOUND,         // bound specification like UNBOUNDED PRECEDING
+    // Phase 13: CTE nodes
+    WITH_CLAUSE,         // WITH clause (entire WITH statement)
+    CTE,                 // Single common table expression
 
     // Error handling
     ERROR, // Invalid syntax
@@ -126,6 +150,9 @@ impl SyntaxKind {
             | EXISTS_KW | ANY_KW | SOME_KW
             | ORDER_KW | LIMIT_KW | OFFSET_KW | HAVING_KW | DISTINCT_KW | ALL_KW | ASC_KW
             | DESC_KW | NULLS_KW | FIRST_KW | LAST_KW
+            | OVER_KW | PARTITION_KW | WINDOW_KW | ROWS_KW | RANGE_KW | GROUPS_KW
+            | UNBOUNDED_KW | PRECEDING_KW | FOLLOWING_KW | CURRENT_KW | ROW_KW
+            | WITH_KW | RECURSIVE_KW | UNION_KW
         )
     }
 

@@ -169,8 +169,8 @@ impl<'a> Parser<'a> {
 
         self.skip_trivia();
 
-        // Parse SELECT statement
-        if self.at(SELECT_KW) {
+        // Parse SELECT statement (can start with WITH)
+        if self.at(SELECT_KW) || self.at(WITH_KW) {
             self.parse_select_stmt();
         } else if !self.at(EOF) {
             self.error("Expected SELECT statement".to_string());
@@ -187,6 +187,12 @@ impl<'a> Parser<'a> {
 
     fn parse_select_stmt(&mut self) {
         self.start_node(SELECT_STMT);
+
+        // WITH clause MUST come first (before SELECT)
+        self.skip_trivia();
+        if self.at(WITH_KW) {
+            self.parse_with_clause();
+        }
 
         // SELECT
         self.expect(SELECT_KW);
@@ -234,6 +240,24 @@ impl<'a> Parser<'a> {
         self.skip_trivia();
         if self.at(LIMIT_KW) {
             self.parse_limit_clause();
+        }
+
+        // UNION clause (set operations)
+        self.skip_trivia();
+        if self.at(UNION_KW) {
+            self.advance();
+            self.skip_trivia();
+            // Optional ALL
+            if self.at(ALL_KW) {
+                self.advance();
+            }
+            self.skip_trivia();
+            // Parse next SELECT
+            if self.at(SELECT_KW) || self.at(WITH_KW) {
+                self.parse_select_stmt();
+            } else {
+                self.error("Expected SELECT after UNION".to_string());
+            }
         }
 
         self.finish_node();
@@ -806,6 +830,12 @@ impl<'a> Parser<'a> {
                 self.start_node_at(checkpoint, FUNCTION_CALL);
                 self.parse_arg_list();
                 self.finish_node();
+
+                // Check for OVER clause (window function)
+                self.skip_trivia();
+                if self.at(OVER_KW) {
+                    self.parse_window_spec();
+                }
             } else if self.at(DOT) {
                 // Could be table.column or namespace.func()
                 self.advance(); // consume DOT
@@ -818,6 +848,12 @@ impl<'a> Parser<'a> {
                     self.start_node_at(checkpoint, FUNCTION_CALL);
                     self.parse_arg_list();
                     self.finish_node();
+
+                    // Check for OVER clause (window function)
+                    self.skip_trivia();
+                    if self.at(OVER_KW) {
+                        self.parse_window_spec();
+                    }
                 }
                 // else: just a qualified name (table.column), no extra node needed
             } else if self.at(DOUBLE_COLON) {
@@ -1072,6 +1108,243 @@ impl<'a> Parser<'a> {
             // Not starting with IDENT, parse as regular expression
             self.parse_expression();
         }
+    }
+
+    // ===== Phase 12: Window Function Support =====
+
+    fn parse_window_spec(&mut self) {
+        self.start_node(WINDOW_SPEC);
+
+        self.expect(OVER_KW);
+        self.skip_trivia();
+
+        if self.at(IDENT) {
+            // Named window reference: OVER window_name
+            self.advance();
+        } else if self.at(LPAREN) {
+            // Inline window specification
+            self.advance();
+            self.skip_trivia();
+
+            // Optional PARTITION BY
+            if self.at(PARTITION_KW) {
+                self.parse_partition_by();
+            }
+
+            // Optional ORDER BY (reuse existing)
+            self.skip_trivia();
+            if self.at(ORDER_KW) {
+                self.parse_order_by_clause();
+            }
+
+            // Optional frame clause
+            self.skip_trivia();
+            if self.at_any(&[ROWS_KW, RANGE_KW, GROUPS_KW]) {
+                self.parse_window_frame();
+            }
+
+            self.expect(RPAREN);
+        } else {
+            self.error("Expected window name or ( after OVER".to_string());
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_partition_by(&mut self) {
+        self.start_node(PARTITION_BY_CLAUSE);
+
+        self.expect(PARTITION_KW);
+        self.expect(BY_KW);
+
+        // Comma-separated expressions
+        loop {
+            self.parse_expression();
+
+            self.skip_trivia();
+            if self.at(COMMA) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_window_frame(&mut self) {
+        self.start_node(WINDOW_FRAME);
+
+        // Frame unit: ROWS, RANGE, or GROUPS
+        if self.at_any(&[ROWS_KW, RANGE_KW, GROUPS_KW]) {
+            self.advance();
+        }
+
+        self.skip_trivia();
+
+        // Frame extent
+        if self.at(BETWEEN_KW) {
+            // BETWEEN start AND end
+            self.advance();
+            self.skip_trivia();
+            self.parse_frame_bound();
+            self.skip_trivia();
+            self.expect(AND_KW);
+            self.skip_trivia();
+            self.parse_frame_bound();
+        } else {
+            // Single bound (implicit CURRENT ROW end)
+            self.parse_frame_bound();
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_frame_bound(&mut self) {
+        self.start_node(FRAME_BOUND);
+
+        if self.at(UNBOUNDED_KW) {
+            self.advance();
+            self.skip_trivia();
+            if self.at(PRECEDING_KW) || self.at(FOLLOWING_KW) {
+                self.advance();
+            } else {
+                self.error("Expected PRECEDING or FOLLOWING after UNBOUNDED".to_string());
+            }
+        } else if self.at(CURRENT_KW) {
+            self.advance();
+            self.skip_trivia();
+            self.expect(ROW_KW);
+        } else if self.at(NUMBER) {
+            // N PRECEDING or N FOLLOWING
+            self.advance();
+            self.skip_trivia();
+            if self.at(PRECEDING_KW) || self.at(FOLLOWING_KW) {
+                self.advance();
+            } else {
+                self.error("Expected PRECEDING or FOLLOWING after number".to_string());
+            }
+        } else {
+            self.error("Expected frame bound (UNBOUNDED, CURRENT ROW, or number)".to_string());
+        }
+
+        self.finish_node();
+    }
+
+    // ===== Phase 13: Common Table Expressions (CTEs) =====
+
+    fn parse_with_clause(&mut self) {
+        self.start_node(WITH_CLAUSE);
+
+        self.expect(WITH_KW);
+
+        // Optional RECURSIVE
+        self.skip_trivia();
+        if self.at(RECURSIVE_KW) {
+            self.advance();
+        }
+
+        // Comma-separated CTEs
+        loop {
+            self.skip_trivia();
+            self.parse_cte();
+
+            self.skip_trivia();
+            if self.at(COMMA) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_cte(&mut self) {
+        self.start_node(CTE);
+
+        // CTE name
+        self.skip_trivia();
+        if !self.expect(IDENT) {
+            self.error("Expected CTE name".to_string());
+            self.finish_node();
+            return;
+        }
+
+        // Optional column list: name(col1, col2)
+        // For now, we'll parse it simply - if we see LPAREN followed by IDENT, it might be a column list
+        self.skip_trivia();
+        if self.at(LPAREN) {
+            // Peek ahead to see if this looks like a column list
+            // Column list: (ident, ident, ...) followed by AS
+            // Query: (SELECT ...) - but this is after AS
+            // So if we see LPAREN and it's NOT preceded by AS, check if it's a column list
+
+            self.advance(); // consume LPAREN
+            self.skip_trivia();
+
+            // If we see IDENT (not SELECT/WITH), assume it's a column list
+            if self.at(IDENT) {
+                // Parse column list
+                loop {
+                    if !self.at(IDENT) {
+                        break;
+                    }
+                    self.advance();
+                    self.skip_trivia();
+
+                    if self.at(COMMA) {
+                        self.advance();
+                        self.skip_trivia();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(RPAREN);
+                self.skip_trivia();
+            } else if self.at(SELECT_KW) || self.at(WITH_KW) {
+                // This is actually the AS clause query, not a column list
+                // Parse the subquery
+                self.start_node(SUBQUERY);
+                self.parse_select_stmt();
+                self.finish_node();
+                self.expect(RPAREN);
+
+                // Done with CTE
+                self.finish_node();
+                return;
+            } else {
+                // Empty or unexpected
+                self.expect(RPAREN);
+                self.skip_trivia();
+            }
+        }
+
+        // AS (query)
+        if !self.expect(AS_KW) {
+            self.error("Expected AS in CTE".to_string());
+            self.finish_node();
+            return;
+        }
+
+        self.skip_trivia();
+        if !self.expect(LPAREN) {
+            self.error("Expected ( after AS in CTE".to_string());
+            self.finish_node();
+            return;
+        }
+
+        self.skip_trivia();
+        if self.at(SELECT_KW) || self.at(WITH_KW) {
+            self.start_node(SUBQUERY);
+            self.parse_select_stmt();
+            self.finish_node();
+        } else {
+            self.error("Expected SELECT or WITH in CTE".to_string());
+        }
+
+        self.expect(RPAREN);
+        self.finish_node();
     }
 }
 
@@ -1462,6 +1735,330 @@ mod tests {
     #[test]
     fn test_having_complex_expression() {
         let input = "SELECT dept, AVG(salary) FROM employees GROUP BY dept HAVING AVG(salary) > 50000 AND COUNT(*) > 10";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    // Phase 12: Window Function Tests
+
+    #[test]
+    fn test_window_function_basic() {
+        let input = "SELECT ROW_NUMBER() OVER (ORDER BY created_at) FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_function_partition() {
+        let input = "SELECT SUM(amount) OVER (PARTITION BY user_id ORDER BY date) FROM orders";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_frame_rows() {
+        let input = "SELECT AVG(price) OVER (ORDER BY date ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) FROM prices";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_frame_unbounded() {
+        let input = "SELECT SUM(amount) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING) FROM sales";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_frame_range() {
+        let input = "SELECT AVG(price) OVER (ORDER BY date RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM prices";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_frame_groups() {
+        let input = "SELECT COUNT(*) OVER (ORDER BY category GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM products";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_window_functions() {
+        let input = "SELECT
+                       ROW_NUMBER() OVER (ORDER BY date),
+                       AVG(price) OVER (PARTITION BY category ORDER BY date)
+                     FROM products";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_function_with_frame_offset() {
+        let input = "SELECT AVG(price) OVER (ORDER BY date ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING) FROM prices";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_function_partition_multiple_columns() {
+        let input = "SELECT SUM(amount) OVER (PARTITION BY user_id, category ORDER BY date) FROM transactions";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_function_range_unbounded_following() {
+        let input = "SELECT SUM(amount) OVER (ORDER BY date RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) FROM sales";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_function_with_aggregate() {
+        let input = "SELECT dept, AVG(salary) OVER (PARTITION BY dept) as avg_dept_salary FROM employees";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_function_rank() {
+        let input = "SELECT name, RANK() OVER (ORDER BY score DESC) as rank FROM students";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_function_dense_rank() {
+        let input = "SELECT name, DENSE_RANK() OVER (PARTITION BY class ORDER BY score DESC) FROM students";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_function_lag() {
+        let input = "SELECT date, price, LAG(price) OVER (ORDER BY date) as prev_price FROM prices";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_window_function_lead() {
+        let input = "SELECT date, price, LEAD(price, 1) OVER (ORDER BY date) as next_price FROM prices";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    // Phase 13: CTE Tests
+
+    #[test]
+    fn test_cte_basic() {
+        let input = "WITH temp AS (SELECT * FROM users) SELECT * FROM temp";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cte_multiple() {
+        let input = "WITH
+                       active_users AS (SELECT * FROM users WHERE active = true),
+                       recent_orders AS (SELECT * FROM orders WHERE date > '2024-01-01')
+                     SELECT * FROM active_users JOIN recent_orders ON active_users.id = recent_orders.user_id";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cte_recursive() {
+        let input = "WITH RECURSIVE tree AS (
+                       SELECT id, parent_id FROM nodes WHERE parent_id IS NULL
+                       UNION ALL
+                       SELECT n.id, n.parent_id FROM nodes n JOIN tree ON n.parent_id = tree.id
+                     ) SELECT * FROM tree";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cte_nested() {
+        let input = "WITH outer_cte AS (
+                       WITH inner_cte AS (SELECT id FROM users)
+                       SELECT * FROM inner_cte
+                     ) SELECT * FROM outer_cte";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cte_with_window_function() {
+        let input = "WITH ranked AS (
+                       SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) as rn FROM users
+                     ) SELECT * FROM ranked WHERE rn <= 10";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cte_with_column_list() {
+        let input = "WITH summary(dept, total) AS (
+                       SELECT department, COUNT(*) FROM employees GROUP BY department
+                     ) SELECT * FROM summary";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_union_basic() {
+        let input = "SELECT id FROM users UNION SELECT id FROM customers";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_union_all() {
+        let input = "SELECT id FROM users UNION ALL SELECT id FROM customers";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_smelt_ref_with_cte() {
+        // Test that smelt.ref() works correctly within CTEs
+        let input = r#"
+WITH recent_activity AS (
+  SELECT user_id, COUNT(*) as event_count
+  FROM smelt.ref('raw_events', filter => date >= '2024-01-01')
+  GROUP BY user_id
+  HAVING COUNT(*) > 10
+)
+SELECT u.name, ra.event_count,
+       RANK() OVER (ORDER BY ra.event_count DESC) as activity_rank
+FROM smelt.ref('users') u
+INNER JOIN recent_activity ra ON u.id = ra.user_id
+WHERE ra.event_count > 100
+ORDER BY ra.event_count DESC
+LIMIT 50
+"#;
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+
+        // Verify that we can find the ref calls
+        use crate::ast::File;
+        let file = File::cast(parse.syntax()).unwrap();
+        let refs: Vec<_> = file.refs().collect();
+        assert_eq!(refs.len(), 2);
+
+        let ref_names: Vec<_> = refs.iter()
+            .filter_map(|r| r.model_name())
+            .collect();
+        assert!(ref_names.contains(&"raw_events".to_string()));
+        assert!(ref_names.contains(&"users".to_string()));
+    }
+
+    #[test]
+    fn test_complex_recursive_cte_with_all_features() {
+        // Comprehensive test combining CTEs, recursive queries, window functions, JOINs, etc.
+        let input = r#"
+WITH RECURSIVE employee_hierarchy AS (
+  SELECT employee_id, name, manager_id, 1 as level
+  FROM employees
+  WHERE manager_id IS NULL
+  UNION ALL
+  SELECT e.employee_id, e.name, e.manager_id, eh.level + 1
+  FROM employees e
+  INNER JOIN employee_hierarchy eh ON e.manager_id = eh.employee_id
+  WHERE eh.level < 10
+),
+department_stats AS (
+  SELECT department_id, COUNT(*) as employee_count, AVG(salary) as avg_salary
+  FROM employees
+  GROUP BY department_id
+  HAVING COUNT(*) > 5
+)
+SELECT eh.name, eh.level, ds.employee_count, ds.avg_salary,
+       ROW_NUMBER() OVER (PARTITION BY eh.level ORDER BY ds.avg_salary DESC) as salary_rank
+FROM employee_hierarchy eh
+LEFT JOIN employees e ON eh.employee_id = e.employee_id
+LEFT JOIN department_stats ds ON e.department_id = ds.department_id
+WHERE eh.level <= 5
+ORDER BY eh.level, ds.avg_salary DESC NULLS LAST
+LIMIT 100
+"#;
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
