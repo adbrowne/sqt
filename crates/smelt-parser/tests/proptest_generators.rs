@@ -33,8 +33,7 @@ pub fn arb_column_ref() -> impl Strategy<Value = String> {
         // Simple column
         arb_identifier(),
         // Qualified column (table.column)
-        (arb_identifier(), arb_identifier())
-            .prop_map(|(table, col)| format!("{}.{}", table, col)),
+        (arb_identifier(), arb_identifier()).prop_map(|(table, col)| format!("{}.{}", table, col)),
     ]
 }
 
@@ -124,8 +123,7 @@ pub fn arb_select_item() -> impl Strategy<Value = String> {
 
 /// Generate a SELECT list (comma-separated items)
 pub fn arb_select_list() -> impl Strategy<Value = String> {
-    prop::collection::vec(arb_select_item(), 1..=5)
-        .prop_map(|items| items.join(", "))
+    prop::collection::vec(arb_select_item(), 1..=5).prop_map(|items| items.join(", "))
 }
 
 // ===== Table references =====
@@ -155,14 +153,15 @@ pub fn arb_join_type() -> impl Strategy<Value = String> {
 
 /// Generate a simple JOIN clause (only ON conditions, not USING for simplicity)
 pub fn arb_join_clause() -> impl Strategy<Value = String> {
-    (arb_join_type(), arb_table_ref(), arb_comparison_expr())
-        .prop_map(|(join_type, table, condition)| {
+    (arb_join_type(), arb_table_ref(), arb_comparison_expr()).prop_map(
+        |(join_type, table, condition)| {
             if join_type == "CROSS JOIN" {
                 format!("{} {}", join_type, table)
             } else {
                 format!("{} {} ON {}", join_type, table, condition)
             }
-        })
+        },
+    )
 }
 
 // ===== WHERE clause =====
@@ -219,17 +218,16 @@ pub fn arb_null_ordering() -> impl Strategy<Value = String> {
 
 /// Generate a single ORDER BY item
 pub fn arb_order_by_item() -> impl Strategy<Value = String> {
-    (arb_column_ref(), arb_sort_direction(), arb_null_ordering())
-        .prop_map(|(col, dir, nulls)| {
-            let mut parts = vec![col];
-            if !dir.is_empty() {
-                parts.push(dir);
-            }
-            if !nulls.is_empty() {
-                parts.push(nulls);
-            }
-            parts.join(" ")
-        })
+    (arb_column_ref(), arb_sort_direction(), arb_null_ordering()).prop_map(|(col, dir, nulls)| {
+        let mut parts = vec![col];
+        if !dir.is_empty() {
+            parts.push(dir);
+        }
+        if !nulls.is_empty() {
+            parts.push(nulls);
+        }
+        parts.join(" ")
+    })
 }
 
 /// Generate an ORDER BY clause
@@ -254,57 +252,54 @@ pub fn arb_limit_clause() -> impl Strategy<Value = String> {
 /// Generate a simple SELECT statement (SELECT ... FROM ...)
 pub fn arb_simple_select() -> impl Strategy<Value = String> {
     (arb_select_list(), arb_table_ref())
-        .prop_map(|(select_list, table)| {
-            format!("SELECT {} FROM {}", select_list, table)
-        })
+        .prop_map(|(select_list, table)| format!("SELECT {} FROM {}", select_list, table))
 }
 
 /// Generate SELECT with WHERE
 pub fn arb_select_with_where() -> impl Strategy<Value = String> {
-    (arb_select_list(), arb_table_ref(), arb_where_clause())
-        .prop_map(|(select_list, table, where_clause)| {
+    (arb_select_list(), arb_table_ref(), arb_where_clause()).prop_map(
+        |(select_list, table, where_clause)| {
             format!("SELECT {} FROM {} {}", select_list, table, where_clause)
-        })
+        },
+    )
 }
 
 /// Generate SELECT with JOIN
 pub fn arb_select_with_join() -> impl Strategy<Value = String> {
-    (arb_select_list(), arb_table_ref(), arb_join_clause())
-        .prop_map(|(select_list, table, join)| {
-            format!("SELECT {} FROM {} {}", select_list, table, join)
-        })
+    (arb_select_list(), arb_table_ref(), arb_join_clause()).prop_map(
+        |(select_list, table, join)| format!("SELECT {} FROM {} {}", select_list, table, join),
+    )
 }
 
 /// Generate SELECT with GROUP BY
 pub fn arb_select_with_group_by() -> impl Strategy<Value = String> {
-    (arb_select_list(), arb_table_ref(), arb_group_by_clause())
-        .prop_map(|(select_list, table, group_by)| {
+    (arb_select_list(), arb_table_ref(), arb_group_by_clause()).prop_map(
+        |(select_list, table, group_by)| {
             format!("SELECT {} FROM {} {}", select_list, table, group_by)
-        })
+        },
+    )
 }
 
 /// Generate SELECT with ORDER BY
 pub fn arb_select_with_order_by() -> impl Strategy<Value = String> {
-    (arb_select_list(), arb_table_ref(), arb_order_by_clause())
-        .prop_map(|(select_list, table, order_by)| {
+    (arb_select_list(), arb_table_ref(), arb_order_by_clause()).prop_map(
+        |(select_list, table, order_by)| {
             format!("SELECT {} FROM {} {}", select_list, table, order_by)
-        })
+        },
+    )
 }
 
 /// Generate SELECT with LIMIT
 pub fn arb_select_with_limit() -> impl Strategy<Value = String> {
-    (arb_select_list(), arb_table_ref(), arb_limit_clause())
-        .prop_map(|(select_list, table, limit)| {
-            format!("SELECT {} FROM {} {}", select_list, table, limit)
-        })
+    (arb_select_list(), arb_table_ref(), arb_limit_clause()).prop_map(
+        |(select_list, table, limit)| format!("SELECT {} FROM {} {}", select_list, table, limit),
+    )
 }
 
 /// Generate DISTINCT SELECT
 pub fn arb_select_distinct() -> impl Strategy<Value = String> {
     (arb_select_list(), arb_table_ref())
-        .prop_map(|(select_list, table)| {
-            format!("SELECT DISTINCT {} FROM {}", select_list, table)
-        })
+        .prop_map(|(select_list, table)| format!("SELECT DISTINCT {} FROM {}", select_list, table))
 }
 
 /// Generate any valid SELECT statement

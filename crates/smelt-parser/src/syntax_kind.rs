@@ -74,22 +74,22 @@ pub enum SyntaxKind {
     FILTER_KW,
 
     // Operators & punctuation
-    LPAREN,   // (
-    RPAREN,   // )
-    COMMA,    // ,
-    DOT,      // .
-    STAR,     // *
-    EQ,       // =
-    NE,       // !=
-    LT,       // <
-    GT,       // >
-    LE,       // <=
-    GE,       // >=
-    PLUS,     // +
-    MINUS,    // -
-    MULTIPLY, // * (same as STAR, but in expression context)
-    DIVIDE,   // /
-    ARROW,    // => (named parameter)
+    LPAREN,       // (
+    RPAREN,       // )
+    COMMA,        // ,
+    DOT,          // .
+    STAR,         // *
+    EQ,           // =
+    NE,           // !=
+    LT,           // <
+    GT,           // >
+    LE,           // <=
+    GE,           // >=
+    PLUS,         // +
+    MINUS,        // -
+    MULTIPLY,     // * (same as STAR, but in expression context)
+    DIVIDE,       // /
+    ARROW,        // => (named parameter)
     DOUBLE_COLON, // :: (PostgreSQL cast operator)
 
     // Literals & identifiers
@@ -116,14 +116,14 @@ pub enum SyntaxKind {
     ARG_LIST,        // (arg1, arg2)
     NAMED_PARAM,     // param_name => value
     // Phase 10: Expression nodes
-    CASE_EXPR,       // CASE WHEN ... THEN ... END
-    WHEN_CLAUSE,     // WHEN condition THEN result
-    CAST_EXPR,       // CAST(expr AS type) or expr::type
-    TYPE_SPEC,       // Type specification (INT, VARCHAR(255), etc.)
-    SUBQUERY,        // (SELECT ...)
-    BETWEEN_EXPR,    // expr BETWEEN low AND high
-    IN_EXPR,         // expr IN (values...)
-    EXISTS_EXPR,     // EXISTS (subquery)
+    CASE_EXPR,    // CASE WHEN ... THEN ... END
+    WHEN_CLAUSE,  // WHEN condition THEN result
+    CAST_EXPR,    // CAST(expr AS type) or expr::type
+    TYPE_SPEC,    // Type specification (INT, VARCHAR(255), etc.)
+    SUBQUERY,     // (SELECT ...)
+    BETWEEN_EXPR, // expr BETWEEN low AND high
+    IN_EXPR,      // expr IN (values...)
+    EXISTS_EXPR,  // EXISTS (subquery)
     // Phase 11: SQL clause nodes
     HAVING_CLAUSE,   // HAVING expression
     ORDER_BY_CLAUSE, // ORDER BY column1, column2
@@ -135,13 +135,13 @@ pub enum SyntaxKind {
     WINDOW_FRAME,        // ROWS/RANGE/GROUPS specification
     FRAME_BOUND,         // bound specification like UNBOUNDED PRECEDING
     // Phase 13: CTE nodes
-    WITH_CLAUSE,         // WITH clause (entire WITH statement)
-    CTE,                 // Single common table expression
+    WITH_CLAUSE, // WITH clause (entire WITH statement)
+    CTE,         // Single common table expression
     // Phase 14: PostgreSQL-specific nodes
-    DISTINCT_ON_CLAUSE,  // DISTINCT ON (expr, expr)
-    TABLESAMPLE_CLAUSE,  // TABLESAMPLE method (percentage) REPEATABLE (seed)
+    DISTINCT_ON_CLAUSE, // DISTINCT ON (expr, expr)
+    TABLESAMPLE_CLAUSE, // TABLESAMPLE method (percentage) REPEATABLE (seed)
     // Phase 15: Aggregate function nodes
-    FILTER_CLAUSE,       // FILTER (WHERE condition)
+    FILTER_CLAUSE, // FILTER (WHERE condition)
 
     // Error handling
     ERROR, // Invalid syntax
@@ -156,18 +156,68 @@ impl SyntaxKind {
     pub fn is_keyword(&self) -> bool {
         matches!(
             self,
-            SELECT_KW | FROM_KW | WHERE_KW | GROUP_KW | BY_KW | AS_KW | AND_KW | OR_KW | NOT_KW
-            | IS_KW | NULL_KW | JOIN_KW | INNER_KW | LEFT_KW | RIGHT_KW | FULL_KW | OUTER_KW
-            | CROSS_KW | ON_KW | USING_KW
-            | CASE_KW | WHEN_KW | THEN_KW | ELSE_KW | END_KW | CAST_KW | BETWEEN_KW | IN_KW
-            | EXISTS_KW | ANY_KW | SOME_KW
-            | ORDER_KW | LIMIT_KW | OFFSET_KW | HAVING_KW | DISTINCT_KW | ALL_KW | ASC_KW
-            | DESC_KW | NULLS_KW | FIRST_KW | LAST_KW
-            | OVER_KW | PARTITION_KW | WINDOW_KW | ROWS_KW | RANGE_KW | GROUPS_KW
-            | UNBOUNDED_KW | PRECEDING_KW | FOLLOWING_KW | CURRENT_KW | ROW_KW
-            | WITH_KW | RECURSIVE_KW | UNION_KW
-            | LATERAL_KW | TABLESAMPLE_KW | BERNOULLI_KW | SYSTEM_KW | REPEATABLE_KW
-            | FILTER_KW
+            SELECT_KW
+                | FROM_KW
+                | WHERE_KW
+                | GROUP_KW
+                | BY_KW
+                | AS_KW
+                | AND_KW
+                | OR_KW
+                | NOT_KW
+                | IS_KW
+                | NULL_KW
+                | JOIN_KW
+                | INNER_KW
+                | LEFT_KW
+                | RIGHT_KW
+                | FULL_KW
+                | OUTER_KW
+                | CROSS_KW
+                | ON_KW
+                | USING_KW
+                | CASE_KW
+                | WHEN_KW
+                | THEN_KW
+                | ELSE_KW
+                | END_KW
+                | CAST_KW
+                | BETWEEN_KW
+                | IN_KW
+                | EXISTS_KW
+                | ANY_KW
+                | SOME_KW
+                | ORDER_KW
+                | LIMIT_KW
+                | OFFSET_KW
+                | HAVING_KW
+                | DISTINCT_KW
+                | ALL_KW
+                | ASC_KW
+                | DESC_KW
+                | NULLS_KW
+                | FIRST_KW
+                | LAST_KW
+                | OVER_KW
+                | PARTITION_KW
+                | WINDOW_KW
+                | ROWS_KW
+                | RANGE_KW
+                | GROUPS_KW
+                | UNBOUNDED_KW
+                | PRECEDING_KW
+                | FOLLOWING_KW
+                | CURRENT_KW
+                | ROW_KW
+                | WITH_KW
+                | RECURSIVE_KW
+                | UNION_KW
+                | LATERAL_KW
+                | TABLESAMPLE_KW
+                | BERNOULLI_KW
+                | SYSTEM_KW
+                | REPEATABLE_KW
+                | FILTER_KW
         )
     }
 

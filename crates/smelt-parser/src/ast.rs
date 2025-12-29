@@ -266,14 +266,16 @@ impl JoinCondition {
 
     /// Check if this is an ON condition (vs USING)
     pub fn is_on(&self) -> bool {
-        self.0.children_with_tokens()
+        self.0
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .any(|t| t.kind() == ON_KW)
     }
 
     /// Check if this is a USING condition
     pub fn is_using(&self) -> bool {
-        self.0.children_with_tokens()
+        self.0
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .any(|t| t.kind() == USING_KW)
     }
@@ -293,7 +295,8 @@ impl JoinCondition {
             return Vec::new();
         }
 
-        self.0.children_with_tokens()
+        self.0
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .filter(|t| t.kind() == IDENT)
             .map(|t| t.text().to_string())
@@ -371,13 +374,24 @@ impl Expr {
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         // Accept any node that looks like an expression
         match node.kind() {
-            EXPRESSION | BINARY_EXPR | FUNCTION_CALL | CASE_EXPR | CAST_EXPR
-            | SUBQUERY | BETWEEN_EXPR | IN_EXPR | EXISTS_EXPR => Some(Self(node)),
+            EXPRESSION | BINARY_EXPR | FUNCTION_CALL | CASE_EXPR | CAST_EXPR | SUBQUERY
+            | BETWEEN_EXPR | IN_EXPR | EXISTS_EXPR => Some(Self(node)),
             _ => {
                 // Also try to wrap the node if it contains expression-like children
-                if node.children().any(|n| matches!(n.kind(),
-                    EXPRESSION | BINARY_EXPR | FUNCTION_CALL | CASE_EXPR
-                    | CAST_EXPR | SUBQUERY | BETWEEN_EXPR | IN_EXPR | EXISTS_EXPR)) {
+                if node.children().any(|n| {
+                    matches!(
+                        n.kind(),
+                        EXPRESSION
+                            | BINARY_EXPR
+                            | FUNCTION_CALL
+                            | CASE_EXPR
+                            | CAST_EXPR
+                            | SUBQUERY
+                            | BETWEEN_EXPR
+                            | IN_EXPR
+                            | EXISTS_EXPR
+                    )
+                }) {
                     Some(Self(node))
                 } else {
                     None
@@ -430,46 +444,57 @@ impl Expr {
 
     /// Check if this is a function call
     pub fn as_function_call(&self) -> Option<FunctionCall> {
-        self.0.children().find_map(FunctionCall::cast)
-            .or_else(|| {
-                // Check if this node itself is a function call
-                FunctionCall::cast(self.0.clone())
-            })
+        self.0.children().find_map(FunctionCall::cast).or_else(|| {
+            // Check if this node itself is a function call
+            FunctionCall::cast(self.0.clone())
+        })
     }
 
     /// Check if this is a CASE expression
     pub fn as_case(&self) -> Option<CaseExpr> {
-        self.0.children().find_map(CaseExpr::cast)
+        self.0
+            .children()
+            .find_map(CaseExpr::cast)
             .or_else(|| CaseExpr::cast(self.0.clone()))
     }
 
     /// Check if this is a CAST expression
     pub fn as_cast(&self) -> Option<CastExpr> {
-        self.0.children().find_map(CastExpr::cast)
+        self.0
+            .children()
+            .find_map(CastExpr::cast)
             .or_else(|| CastExpr::cast(self.0.clone()))
     }
 
     /// Check if this is a subquery
     pub fn as_subquery(&self) -> Option<Subquery> {
-        self.0.children().find_map(Subquery::cast)
+        self.0
+            .children()
+            .find_map(Subquery::cast)
             .or_else(|| Subquery::cast(self.0.clone()))
     }
 
     /// Check if this is a BETWEEN expression
     pub fn as_between(&self) -> Option<BetweenExpr> {
-        self.0.children().find_map(BetweenExpr::cast)
+        self.0
+            .children()
+            .find_map(BetweenExpr::cast)
             .or_else(|| BetweenExpr::cast(self.0.clone()))
     }
 
     /// Check if this is an IN expression
     pub fn as_in(&self) -> Option<InExpr> {
-        self.0.children().find_map(InExpr::cast)
+        self.0
+            .children()
+            .find_map(InExpr::cast)
             .or_else(|| InExpr::cast(self.0.clone()))
     }
 
     /// Check if this is an EXISTS expression
     pub fn as_exists(&self) -> Option<ExistsExpr> {
-        self.0.children().find_map(ExistsExpr::cast)
+        self.0
+            .children()
+            .find_map(ExistsExpr::cast)
             .or_else(|| ExistsExpr::cast(self.0.clone()))
     }
 
@@ -489,7 +514,8 @@ pub struct ColumnRef {
 impl ColumnRef {
     /// Try to parse a column reference from an expression
     pub fn from_expr(expr: &Expr) -> Option<Self> {
-        let tokens: Vec<_> = expr.0
+        let tokens: Vec<_> = expr
+            .0
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .filter(|t| t.kind() == IDENT || t.kind() == DOT)
@@ -547,7 +573,8 @@ impl FunctionCall {
     /// Get the function name (e.g., "COUNT", "SUM", "ref")
     /// For namespaced calls like smelt.ref(), returns just "ref"
     pub fn name(&self) -> Option<String> {
-        let tokens: Vec<_> = self.0
+        let tokens: Vec<_> = self
+            .0
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .collect();
@@ -570,7 +597,8 @@ impl FunctionCall {
 
     /// Get the namespace prefix if this is a namespaced call (e.g., "smelt" from smelt.ref())
     pub fn namespace(&self) -> Option<String> {
-        let tokens: Vec<_> = self.0
+        let tokens: Vec<_> = self
+            .0
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .collect();
@@ -594,9 +622,7 @@ impl FunctionCall {
 
     /// Get all named parameters from this function call
     pub fn named_params(&self) -> impl Iterator<Item = NamedParam> + '_ {
-        self.0
-            .descendants()
-            .filter_map(NamedParam::cast)
+        self.0.descendants().filter_map(NamedParam::cast)
     }
 }
 
@@ -680,13 +706,13 @@ impl RefCall {
 
     /// Get the text range of the entire ref call
     pub fn range(&self) -> TextRange {
-        self.0.0.text_range()
+        self.0 .0.text_range()
     }
 
     /// Get the text range of just the model name string (inside quotes)
     pub fn name_range(&self) -> Option<TextRange> {
         self.0
-            .0
+             .0
             .descendants_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == STRING)
@@ -759,7 +785,8 @@ impl CaseExpr {
     /// Returns None for searched CASE (CASE WHEN ...)
     pub fn case_value(&self) -> Option<Expr> {
         // The case value is the first EXPRESSION child, before any WHEN_CLAUSE
-        self.0.children()
+        self.0
+            .children()
             .take_while(|n| n.kind() != WHEN_CLAUSE)
             .find_map(Expr::cast)
     }
@@ -841,7 +868,8 @@ impl CastExpr {
 
     /// Check if this is a PostgreSQL :: cast (vs CAST(...))
     pub fn is_double_colon_cast(&self) -> bool {
-        self.0.children_with_tokens()
+        self.0
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .any(|t| t.kind() == DOUBLE_COLON)
     }
@@ -862,7 +890,8 @@ impl TypeSpec {
 
     /// Get the type name (e.g., "INTEGER", "VARCHAR")
     pub fn type_name(&self) -> Option<String> {
-        self.0.children_with_tokens()
+        self.0
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == IDENT)
             .map(|t| t.text().to_string())
@@ -1115,7 +1144,10 @@ impl LimitClause {
             .collect();
 
         for i in 0..tokens.len() {
-            if tokens[i].kind() == OFFSET_KW && i + 1 < tokens.len() && tokens[i + 1].kind() == NUMBER {
+            if tokens[i].kind() == OFFSET_KW
+                && i + 1 < tokens.len()
+                && tokens[i + 1].kind() == NUMBER
+            {
                 return Some(tokens[i + 1].text().to_string());
             }
         }

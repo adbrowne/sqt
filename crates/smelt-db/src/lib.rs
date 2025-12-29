@@ -81,10 +81,7 @@ fn parse_file(db: &dyn Syntax, path: PathBuf) -> Arc<smelt_parser::Parse> {
 
 fn parse_model(db: &dyn Syntax, path: PathBuf) -> Option<Arc<Model>> {
     // Extract model name from file path (e.g., models/users.sql -> users)
-    let model_name = path
-        .file_stem()?
-        .to_str()?
-        .to_string();
+    let model_name = path.file_stem()?.to_str()?.to_string();
 
     // Parse file and check if it contains a valid SELECT statement
     let parse = db.parse_file(path.clone());
@@ -141,7 +138,8 @@ fn resolve_ref(db: &dyn Semantic, model_name: String) -> Option<PathBuf> {
     let models = db.all_models();
 
     // Find the model with this name
-    models.iter()
+    models
+        .iter()
         .find(|(_, model)| model.name == model_name)
         .map(|(path, _)| path.clone())
 }
@@ -165,7 +163,11 @@ fn file_diagnostics(db: &dyn Semantic, path: PathBuf) -> Arc<Vec<Diagnostic>> {
     // Check if model is valid
     if db.parse_model(path.clone()).is_none() {
         // Only report error if file is supposed to be a model (in models/ directory)
-        if path.to_str().map(|s| s.contains("models/")).unwrap_or(false) {
+        if path
+            .to_str()
+            .map(|s| s.contains("models/"))
+            .unwrap_or(false)
+        {
             diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,
                 message: "File does not contain a valid SQL query".to_string(),
@@ -460,7 +462,10 @@ mod tests {
         );
 
         // Set up all_files for model resolution
-        db.set_all_files(Arc::new(vec![raw_events_path.clone(), sessions_path.clone()]));
+        db.set_all_files(Arc::new(vec![
+            raw_events_path.clone(),
+            sessions_path.clone(),
+        ]));
 
         let schema = db.model_schema(sessions_path);
 
@@ -469,7 +474,10 @@ mod tests {
         // user_id should be traced to raw_events
         assert_eq!(schema.columns[0].name, "user_id");
         match &schema.columns[0].source {
-            ColumnSource::FromModel { model_name, column_name } => {
+            ColumnSource::FromModel {
+                model_name,
+                column_name,
+            } => {
                 assert_eq!(model_name, "raw_events");
                 assert_eq!(column_name, "user_id");
             }
@@ -493,7 +501,9 @@ mod tests {
         let raw_events_path = PathBuf::from("models/raw_events.sql");
         db.set_file_text(
             raw_events_path.clone(),
-            Arc::new("SELECT\n  user_id,\n  event_id,\n  event_time\nFROM source.events".to_string()),
+            Arc::new(
+                "SELECT\n  user_id,\n  event_id,\n  event_time\nFROM source.events".to_string(),
+            ),
         );
 
         // Create downstream model
@@ -503,7 +513,10 @@ mod tests {
             Arc::new("SELECT\n  user_id\nFROM smelt.ref('raw_events')".to_string()),
         );
 
-        db.set_all_files(Arc::new(vec![raw_events_path.clone(), sessions_path.clone()]));
+        db.set_all_files(Arc::new(vec![
+            raw_events_path.clone(),
+            sessions_path.clone(),
+        ]));
 
         let available = db.available_columns(sessions_path);
 
@@ -539,15 +552,17 @@ mod tests {
 
         // Check severity and message
         assert_eq!(diag.severity, DiagnosticSeverity::Error);
-        assert!(diag.message.contains("Undefined model reference: 'nonexistent_model'"));
+        assert!(diag
+            .message
+            .contains("Undefined model reference: 'nonexistent_model'"));
 
         // Check position - should point to the string parameter 'nonexistent_model'
         // In "SELECT * FROM smelt.ref('nonexistent_model')", the STRING token (including quotes)
         // starts at position 24 and ends at position 43 (exclusive)
         assert_eq!(diag.range.start.line, 0);
-        assert_eq!(diag.range.start.column, 24);  // Opening quote ' (0-indexed)
+        assert_eq!(diag.range.start.column, 24); // Opening quote ' (0-indexed)
         assert_eq!(diag.range.end.line, 0);
-        assert_eq!(diag.range.end.column, 43);    // One past closing quote ' (exclusive)
+        assert_eq!(diag.range.end.column, 43); // One past closing quote ' (exclusive)
     }
 
     #[test]
@@ -571,7 +586,11 @@ mod tests {
                 }
                 if let Some(text_range) = ref_call.name_range() {
                     println!("  TextRange: {:?}", text_range);
-                    println!("  Start offset: {}, End offset: {}", usize::from(text_range.start()), usize::from(text_range.end()));
+                    println!(
+                        "  Start offset: {}, End offset: {}",
+                        usize::from(text_range.start()),
+                        usize::from(text_range.end())
+                    );
 
                     // Check content length
                     println!("  Content length: {}", text.len());
@@ -583,7 +602,11 @@ mod tests {
                         let extracted = &text[start..end];
                         println!("  Extracted text: {:?}", extracted);
                     } else {
-                        println!("  ERROR: Range {} out of bounds (content length is {})", end, text.len());
+                        println!(
+                            "  ERROR: Range {} out of bounds (content length is {})",
+                            end,
+                            text.len()
+                        );
                     }
                 }
             }
@@ -601,9 +624,13 @@ mod tests {
         println!("Number of diagnostics: {}", diagnostics.len());
         if !diagnostics.is_empty() {
             let diag = &diagnostics[0];
-            println!("Diagnostic range: line {} col {} to line {} col {}",
-                     diag.range.start.line, diag.range.start.column,
-                     diag.range.end.line, diag.range.end.column);
+            println!(
+                "Diagnostic range: line {} col {} to line {} col {}",
+                diag.range.start.line,
+                diag.range.start.column,
+                diag.range.end.line,
+                diag.range.end.column
+            );
         }
 
         // Should have exactly one diagnostic
@@ -631,7 +658,13 @@ mod tests {
         let mut offset = 0;
         for token in &tokens {
             let text = &content[offset..offset + token.len];
-            println!("  {:?} @ {}..{}: {:?}", token.kind, offset, offset + token.len, text);
+            println!(
+                "  {:?} @ {}..{}: {:?}",
+                token.kind,
+                offset,
+                offset + token.len,
+                text
+            );
             offset += token.len;
         }
         println!("Final offset: {}", offset);

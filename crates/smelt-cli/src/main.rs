@@ -79,8 +79,8 @@ async fn run(args: RunArgs) -> Result<()> {
     println!("Project directory: {}", project_dir.display());
 
     // 2. Load configuration
-    let config = Config::load(&project_dir)
-        .with_context(|| "Failed to load smelt.yml configuration")?;
+    let config =
+        Config::load(&project_dir).with_context(|| "Failed to load smelt.yml configuration")?;
 
     println!("Project: {} (version {})", config.name, config.version);
 
@@ -89,7 +89,12 @@ async fn run(args: RunArgs) -> Result<()> {
         anyhow::anyhow!(
             "Target '{}' not found in smelt.yml. Available targets: {}",
             args.target,
-            config.targets.keys().cloned().collect::<Vec<_>>().join(", ")
+            config
+                .targets
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     })?;
 
@@ -97,11 +102,7 @@ async fn run(args: RunArgs) -> Result<()> {
     let sources = SourceConfig::load(&project_dir).ok();
 
     if let Some(ref source_config) = sources {
-        let source_count: usize = source_config
-            .sources
-            .values()
-            .map(|s| s.tables.len())
-            .sum();
+        let source_count: usize = source_config.sources.values().map(|s| s.tables.len()).sum();
         println!("Loaded {} source tables", source_count);
     }
 
@@ -154,9 +155,10 @@ async fn run(args: RunArgs) -> Result<()> {
     // 6. Create backend based on target type
     let backend: Box<dyn Backend> = match target_config.backend_type() {
         BackendType::DuckDB => {
-            let database = target_config.database.as_ref().ok_or_else(|| {
-                anyhow::anyhow!("DuckDB target requires 'database' field")
-            })?;
+            let database = target_config
+                .database
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("DuckDB target requires 'database' field"))?;
 
             let db_path = args.database.unwrap_or_else(|| project_dir.join(database));
             println!("\nBackend: DuckDB");
@@ -171,15 +173,13 @@ async fn run(args: RunArgs) -> Result<()> {
         BackendType::Spark => {
             #[cfg(feature = "spark")]
             {
-                let connect_url = target_config.connect_url.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!("Spark target requires 'connect_url' field")
-                })?;
+                let connect_url = target_config
+                    .connect_url
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Spark target requires 'connect_url' field"))?;
 
                 let default_catalog = "spark_catalog".to_string();
-                let catalog = target_config
-                    .catalog
-                    .as_ref()
-                    .unwrap_or(&default_catalog);
+                let catalog = target_config.catalog.as_ref().unwrap_or(&default_catalog);
 
                 println!("\nBackend: Spark");
                 println!("Connect URL: {}", connect_url);
@@ -213,10 +213,12 @@ async fn run(args: RunArgs) -> Result<()> {
     let time_range = match (&args.event_time_start, &args.event_time_end) {
         (Some(start), Some(end)) => {
             // Validate date format
-            NaiveDate::parse_from_str(start, "%Y-%m-%d")
-                .with_context(|| format!("Invalid start date format: {}. Expected YYYY-MM-DD", start))?;
-            NaiveDate::parse_from_str(end, "%Y-%m-%d")
-                .with_context(|| format!("Invalid end date format: {}. Expected YYYY-MM-DD", end))?;
+            NaiveDate::parse_from_str(start, "%Y-%m-%d").with_context(|| {
+                format!("Invalid start date format: {}. Expected YYYY-MM-DD", start)
+            })?;
+            NaiveDate::parse_from_str(end, "%Y-%m-%d").with_context(|| {
+                format!("Invalid end date format: {}. Expected YYYY-MM-DD", end)
+            })?;
 
             println!("\nTime range: {} to {} (exclusive)", start, end);
             Some(TimeRange {
@@ -307,8 +309,7 @@ async fn run(args: RunArgs) -> Result<()> {
             // Show preview if requested
             if let Some(ref batches) = result.preview {
                 println!("\n  Preview:");
-                pretty::print_batches(batches)
-                    .with_context(|| "Failed to print result preview")?;
+                pretty::print_batches(batches).with_context(|| "Failed to print result preview")?;
                 println!();
             }
 
@@ -356,8 +357,7 @@ async fn run(args: RunArgs) -> Result<()> {
             // Show preview if requested
             if let Some(ref batches) = result.preview {
                 println!("\n  Preview:");
-                pretty::print_batches(batches)
-                    .with_context(|| "Failed to print result preview")?;
+                pretty::print_batches(batches).with_context(|| "Failed to print result preview")?;
                 println!();
             }
 

@@ -26,7 +26,9 @@ pub enum TransformError {
     #[error("No FROM clause found - cannot inject time filter")]
     NoFromClause,
 
-    #[error("Query contains subqueries which are not yet supported for incremental transformation")]
+    #[error(
+        "Query contains subqueries which are not yet supported for incremental transformation"
+    )]
     SubqueryNotSupported,
 }
 
@@ -145,8 +147,14 @@ GROUP BY 1, 2
         let result = inject_time_filter(sql, "transaction_timestamp", &range).unwrap();
 
         // Should have both the original WHERE and the new filter
-        assert!(result.contains("WHERE transaction_timestamp IS NOT NULL"), "Missing original WHERE. Got: {}", result);
-        assert!(result.contains("AND (transaction_timestamp >= '2024-01-15' AND transaction_timestamp < '2024-01-18')"));
+        assert!(
+            result.contains("WHERE transaction_timestamp IS NOT NULL"),
+            "Missing original WHERE. Got: {}",
+            result
+        );
+        assert!(result.contains(
+            "AND (transaction_timestamp >= '2024-01-15' AND transaction_timestamp < '2024-01-18')"
+        ));
         // GROUP BY should still be there
         assert!(result.contains("GROUP BY 1, 2"));
     }
@@ -174,7 +182,9 @@ GROUP BY 1, 2
         let result = inject_time_filter(sql, "orders.created_at", &range).unwrap();
 
         // Should have WHERE clause injected
-        assert!(result.contains("WHERE orders.created_at >= '2024-01-15' AND orders.created_at < '2024-01-18'"));
+        assert!(result.contains(
+            "WHERE orders.created_at >= '2024-01-15' AND orders.created_at < '2024-01-18'"
+        ));
         // JOINs should still be there
         assert!(result.contains("INNER JOIN"));
     }

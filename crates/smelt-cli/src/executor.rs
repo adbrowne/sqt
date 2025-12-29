@@ -2,7 +2,9 @@ use crate::compiler::CompiledModel;
 use crate::config::SourceConfig;
 use crate::errors::CliError;
 use anyhow::Result;
-use smelt_backend::{Backend, ExecutionResult, Materialization, MaterializationStrategy, PartitionSpec};
+use smelt_backend::{
+    Backend, ExecutionResult, Materialization, MaterializationStrategy, PartitionSpec,
+};
 
 /// Execute a compiled model using any Backend implementation.
 pub async fn execute_model(
@@ -18,7 +20,13 @@ pub async fn execute_model(
     };
 
     backend
-        .execute_model(schema, &compiled.name, &compiled.sql, materialization, show_results)
+        .execute_model(
+            schema,
+            &compiled.name,
+            &compiled.sql,
+            materialization,
+            show_results,
+        )
         .await
         .map_err(|e| {
             CliError::ExecutionError {
@@ -44,7 +52,10 @@ pub async fn execute_model_incremental(
     show_results: bool,
 ) -> Result<ExecutionResult> {
     // Views can't be incremental - warn and use full refresh
-    if matches!(compiled.materialization, crate::config::Materialization::View) {
+    if matches!(
+        compiled.materialization,
+        crate::config::Materialization::View
+    ) {
         eprintln!(
             "  Warning: {} is a view, using full refresh (views cannot be incremental)",
             compiled.name
@@ -75,10 +86,7 @@ pub async fn execute_model_incremental(
 }
 
 /// Validate that all source tables exist in the backend.
-pub async fn validate_sources(
-    backend: &dyn Backend,
-    sources: &SourceConfig,
-) -> Result<()> {
+pub async fn validate_sources(backend: &dyn Backend, sources: &SourceConfig) -> Result<()> {
     let mut missing = Vec::new();
 
     for (schema_name, schema) in &sources.sources {
@@ -129,7 +137,9 @@ mod tests {
             materialization: crate::config::Materialization::Table,
         };
 
-        let result = execute_model(&backend, &compiled, "main", false).await.unwrap();
+        let result = execute_model(&backend, &compiled, "main", false)
+            .await
+            .unwrap();
 
         assert_eq!(result.model_name, "test_model");
         assert_eq!(result.row_count, 1);
@@ -149,7 +159,9 @@ mod tests {
             materialization: crate::config::Materialization::View,
         };
 
-        let result = execute_model(&backend, &compiled, "main", false).await.unwrap();
+        let result = execute_model(&backend, &compiled, "main", false)
+            .await
+            .unwrap();
 
         assert_eq!(result.model_name, "test_view");
         assert_eq!(result.row_count, 1);
@@ -168,7 +180,9 @@ mod tests {
             materialization: crate::config::Materialization::Table,
         };
 
-        let result = execute_model(&backend, &compiled, "main", true).await.unwrap();
+        let result = execute_model(&backend, &compiled, "main", true)
+            .await
+            .unwrap();
 
         assert_eq!(result.row_count, 3);
         assert!(result.preview.is_some());

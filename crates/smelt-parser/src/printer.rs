@@ -111,12 +111,19 @@ impl Display for SelectStmt {
         if let Some(where_clause) = self.where_clause() {
             let full_text = where_clause.text();
             // Remove the "WHERE" keyword from the text
-            let expr_text = full_text.trim_start_matches("WHERE").trim_start_matches("where").trim();
+            let expr_text = full_text
+                .trim_start_matches("WHERE")
+                .trim_start_matches("where")
+                .trim();
             write!(f, " WHERE {}", expr_text)?;
         }
 
         // GROUP BY clause
-        if let Some(group_by) = self.syntax().children().find(|n| n.kind() == GROUP_BY_CLAUSE) {
+        if let Some(group_by) = self
+            .syntax()
+            .children()
+            .find(|n| n.kind() == GROUP_BY_CLAUSE)
+        {
             write!(f, " GROUP BY {}", extract_group_by_expressions(&group_by))?;
         }
 
@@ -544,7 +551,13 @@ mod tests {
         let printed = file.to_string();
 
         let parse2 = parse(&printed);
-        assert_eq!(parse2.errors.len(), 0, "Re-parse errors: {:?}\nPrinted SQL: {}", parse2.errors, printed);
+        assert_eq!(
+            parse2.errors.len(),
+            0,
+            "Re-parse errors: {:?}\nPrinted SQL: {}",
+            parse2.errors,
+            printed
+        );
 
         // For debugging: print both versions
         if printed.trim() != sql.trim() {

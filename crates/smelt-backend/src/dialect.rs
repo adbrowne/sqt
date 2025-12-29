@@ -74,7 +74,7 @@ impl BackendCapabilities {
     /// Capabilities for Spark SQL
     pub fn spark() -> Self {
         Self {
-            supports_qualify: false, // Requires subquery rewrite
+            supports_qualify: false,                 // Requires subquery rewrite
             supports_create_or_replace_table: false, // DROP + CREATE
             supports_create_or_replace_view: true,
             supports_merge: true, // Delta Lake only
@@ -89,10 +89,10 @@ impl BackendCapabilities {
     /// Capabilities for PostgreSQL
     pub fn postgresql() -> Self {
         Self {
-            supports_qualify: false, // Requires subquery rewrite
+            supports_qualify: false,                 // Requires subquery rewrite
             supports_create_or_replace_table: false, // DROP + CREATE
             supports_create_or_replace_view: true,
-            supports_merge: true, // PostgreSQL 15+
+            supports_merge: true,  // PostgreSQL 15+
             supports_pivot: false, // Requires crosstab extension
             supports_date_literal: true,
             supports_concat_operator: true,

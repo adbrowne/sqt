@@ -142,24 +142,16 @@ impl<'a> Parser<'a> {
     fn at_keyword_that_ends_table_ref(&self) -> bool {
         // Keywords that can follow a table reference in the FROM clause
         self.at_any(&[
-            WHERE_KW,
-            GROUP_KW,
-            HAVING_KW,
-            ORDER_KW,
-            LIMIT_KW,
-            // JOIN keywords
-            JOIN_KW,
-            INNER_KW,
-            LEFT_KW,
-            RIGHT_KW,
-            FULL_KW,
-            CROSS_KW,
+            WHERE_KW, GROUP_KW, HAVING_KW, ORDER_KW, LIMIT_KW, // JOIN keywords
+            JOIN_KW, INNER_KW, LEFT_KW, RIGHT_KW, FULL_KW, CROSS_KW,
         ])
     }
 
     /// Check if current token can start an expression
     fn at_expression_start(&self) -> bool {
-        self.at_any(&[IDENT, NUMBER, STRING, LPAREN, NOT_KW, CASE_KW, CAST_KW, EXISTS_KW])
+        self.at_any(&[
+            IDENT, NUMBER, STRING, LPAREN, NOT_KW, CASE_KW, CAST_KW, EXISTS_KW,
+        ])
     }
 
     // ===== Parsing rules =====
@@ -546,7 +538,6 @@ impl<'a> Parser<'a> {
                 return;
             }
             self.parse_expression();
-
         } else if self.at(USING_KW) {
             // USING (col1, col2, ...)
             self.advance();
@@ -1529,7 +1520,8 @@ mod tests {
 
     #[test]
     fn test_case_simple() {
-        let input = "SELECT CASE status WHEN 'active' THEN 1 WHEN 'pending' THEN 0 ELSE -1 END FROM users";
+        let input =
+            "SELECT CASE status WHEN 'active' THEN 1 WHEN 'pending' THEN 0 ELSE -1 END FROM users";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -1649,7 +1641,8 @@ mod tests {
 
     #[test]
     fn test_in_subquery() {
-        let input = "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total > 100)";
+        let input =
+            "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total > 100)";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -1942,7 +1935,8 @@ mod tests {
 
     #[test]
     fn test_window_function_with_aggregate() {
-        let input = "SELECT dept, AVG(salary) OVER (PARTITION BY dept) as avg_dept_salary FROM employees";
+        let input =
+            "SELECT dept, AVG(salary) OVER (PARTITION BY dept) as avg_dept_salary FROM employees";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -1962,7 +1956,8 @@ mod tests {
 
     #[test]
     fn test_window_function_dense_rank() {
-        let input = "SELECT name, DENSE_RANK() OVER (PARTITION BY class ORDER BY score DESC) FROM students";
+        let input =
+            "SELECT name, DENSE_RANK() OVER (PARTITION BY class ORDER BY score DESC) FROM students";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -1982,7 +1977,8 @@ mod tests {
 
     #[test]
     fn test_window_function_lead() {
-        let input = "SELECT date, price, LEAD(price, 1) OVER (ORDER BY date) as next_price FROM prices";
+        let input =
+            "SELECT date, price, LEAD(price, 1) OVER (ORDER BY date) as next_price FROM prices";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
@@ -2116,9 +2112,7 @@ LIMIT 50
         let refs: Vec<_> = file.refs().collect();
         assert_eq!(refs.len(), 2);
 
-        let ref_names: Vec<_> = refs.iter()
-            .filter_map(|r| r.model_name())
-            .collect();
+        let ref_names: Vec<_> = refs.iter().filter_map(|r| r.model_name()).collect();
         assert!(ref_names.contains(&"raw_events".to_string()));
         assert!(ref_names.contains(&"users".to_string()));
     }
@@ -2173,7 +2167,10 @@ LIMIT 100
 
         // Find DISTINCT_ON_CLAUSE
         let distinct_on = select.children().find(|n| n.kind() == DISTINCT_ON_CLAUSE);
-        assert!(distinct_on.is_some(), "DISTINCT ON clause should be present");
+        assert!(
+            distinct_on.is_some(),
+            "DISTINCT ON clause should be present"
+        );
     }
 
     #[test]
@@ -2196,7 +2193,8 @@ LIMIT 100
 
     #[test]
     fn test_lateral_subquery() {
-        let input = "SELECT * FROM users, LATERAL (SELECT * FROM orders WHERE user_id = users.id) o";
+        let input =
+            "SELECT * FROM users, LATERAL (SELECT * FROM orders WHERE user_id = users.id) o";
         let parse = parse(input);
         assert_eq!(parse.errors.len(), 0);
     }
@@ -2209,7 +2207,10 @@ LIMIT 100
 
         let root = parse.syntax();
         let tablesample = root.descendants().find(|n| n.kind() == TABLESAMPLE_CLAUSE);
-        assert!(tablesample.is_some(), "TABLESAMPLE clause should be present");
+        assert!(
+            tablesample.is_some(),
+            "TABLESAMPLE clause should be present"
+        );
     }
 
     #[test]
@@ -2252,5 +2253,4 @@ LIMIT 100
         let parse = parse(input);
         assert_eq!(parse.errors.len(), 0);
     }
-
 }

@@ -112,12 +112,11 @@ pub struct IncrementalConfig {
 impl Config {
     pub fn load(project_dir: &Path) -> Result<Self> {
         let config_path = project_dir.join("smelt.yml");
-        let content = std::fs::read_to_string(&config_path).map_err(|e| {
-            CliError::ConfigLoadError {
+        let content =
+            std::fs::read_to_string(&config_path).map_err(|e| CliError::ConfigLoadError {
                 path: config_path.clone(),
                 source: e.into(),
-            }
-        })?;
+            })?;
 
         serde_yaml::from_str(&content).map_err(|e| {
             CliError::ConfigLoadError {
@@ -174,12 +173,11 @@ pub struct SourceColumn {
 impl SourceConfig {
     pub fn load(project_dir: &Path) -> Result<Self> {
         let sources_path = project_dir.join("sources.yml");
-        let content = std::fs::read_to_string(&sources_path).map_err(|e| {
-            CliError::ConfigLoadError {
+        let content =
+            std::fs::read_to_string(&sources_path).map_err(|e| CliError::ConfigLoadError {
                 path: sources_path.clone(),
                 source: e.into(),
-            }
-        })?;
+            })?;
 
         serde_yaml::from_str(&content).map_err(|e| {
             CliError::ConfigLoadError {

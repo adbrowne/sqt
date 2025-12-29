@@ -69,7 +69,5 @@ pub enum MaterializationStrategy {
     FullRefresh,
 
     /// Incremental: DELETE by partition + INSERT
-    Incremental {
-        partition: PartitionSpec,
-    },
+    Incremental { partition: PartitionSpec },
 }

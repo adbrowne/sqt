@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tokio::sync::Mutex;
 
-use smelt_db::{Database, Diagnostic as DbDiagnostic, DiagnosticSeverity as DbSeverity, Inputs, Schema, Semantic, Syntax};
+use smelt_db::{
+    Database, Diagnostic as DbDiagnostic, DiagnosticSeverity as DbSeverity, Inputs, Schema,
+    Semantic, Syntax,
+};
 use smelt_parser::ast::File as AstFile;
 
 struct Backend {
@@ -303,7 +306,8 @@ impl LanguageServer for Backend {
                                         ));
                                     }
                                     smelt_db::ColumnSource::Computed => {
-                                        if !col.expression.is_empty() && col.expression != col.name {
+                                        if !col.expression.is_empty() && col.expression != col.name
+                                        {
                                             content.push_str(&format!(" = `{}`", col.expression));
                                         }
                                     }
@@ -371,7 +375,9 @@ impl LanguageServer for Backend {
             CompletionContext::InsideRef => {
                 // Complete model names
                 let models = db.all_models();
-                models.values().map(|model| CompletionItem {
+                models
+                    .values()
+                    .map(|model| CompletionItem {
                         label: model.name.clone(),
                         kind: Some(CompletionItemKind::MODULE),
                         detail: Some(format!("Model: {}", model.name)),
@@ -427,8 +433,8 @@ impl LanguageServer for Backend {
 /// Completion context types
 #[derive(Debug)]
 enum CompletionContext {
-    InsideRef,   // Cursor inside ref('|')
-    ColumnName,  // Cursor in a position where column name is expected
+    InsideRef,  // Cursor inside ref('|')
+    ColumnName, // Cursor in a position where column name is expected
     None,
 }
 
