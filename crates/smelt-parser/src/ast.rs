@@ -53,6 +53,25 @@ impl SelectStmt {
     pub fn where_clause(&self) -> Option<WhereClause> {
         self.0.children().find_map(WhereClause::cast)
     }
+
+    pub fn having_clause(&self) -> Option<HavingClause> {
+        self.0.children().find_map(HavingClause::cast)
+    }
+
+    pub fn order_by_clause(&self) -> Option<OrderByClause> {
+        self.0.children().find_map(OrderByClause::cast)
+    }
+
+    pub fn limit_clause(&self) -> Option<LimitClause> {
+        self.0.children().find_map(LimitClause::cast)
+    }
+
+    pub fn is_distinct(&self) -> bool {
+        self.0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .any(|t| t.kind() == DISTINCT_KW)
+    }
 }
 
 /// SELECT list (columns)
@@ -916,5 +935,157 @@ impl ExistsExpr {
     /// Get the subquery
     pub fn subquery(&self) -> Option<Subquery> {
         self.0.children().find_map(Subquery::cast)
+    }
+}
+
+// ===== Phase 11: SQL Clause AST Wrappers =====
+
+/// HAVING clause
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HavingClause(SyntaxNode);
+
+impl HavingClause {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == HAVING_CLAUSE {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    pub fn expression(&self) -> Option<Expr> {
+        self.0.children().find_map(Expr::cast)
+    }
+}
+
+/// ORDER BY clause
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OrderByClause(SyntaxNode);
+
+impl OrderByClause {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == ORDER_BY_CLAUSE {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    pub fn items(&self) -> impl Iterator<Item = OrderByItem> + '_ {
+        self.0.children().filter_map(OrderByItem::cast)
+    }
+}
+
+/// ORDER BY item
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OrderByItem(SyntaxNode);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NullOrdering {
+    First,
+    Last,
+}
+
+impl OrderByItem {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == ORDER_BY_ITEM {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    pub fn expression(&self) -> Option<Expr> {
+        self.0.children().find_map(Expr::cast)
+    }
+
+    pub fn direction(&self) -> Option<SortDirection> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find_map(|t| match t.kind() {
+                ASC_KW => Some(SortDirection::Asc),
+                DESC_KW => Some(SortDirection::Desc),
+                _ => None,
+            })
+    }
+
+    pub fn null_ordering(&self) -> Option<NullOrdering> {
+        let tokens: Vec<_> = self
+            .0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .collect();
+
+        for i in 0..tokens.len() {
+            if tokens[i].kind() == NULLS_KW && i + 1 < tokens.len() {
+                return match tokens[i + 1].kind() {
+                    FIRST_KW => Some(NullOrdering::First),
+                    LAST_KW => Some(NullOrdering::Last),
+                    _ => None,
+                };
+            }
+        }
+        None
+    }
+}
+
+/// LIMIT clause
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LimitClause(SyntaxNode);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LimitValue {
+    Number(String),
+    All,
+}
+
+impl LimitClause {
+    pub fn cast(node: SyntaxNode) -> Option<Self> {
+        if node.kind() == LIMIT_CLAUSE {
+            Some(Self(node))
+        } else {
+            None
+        }
+    }
+
+    pub fn limit_value(&self) -> Option<LimitValue> {
+        let tokens: Vec<_> = self
+            .0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .collect();
+
+        for i in 0..tokens.len() {
+            if tokens[i].kind() == LIMIT_KW && i + 1 < tokens.len() {
+                return match tokens[i + 1].kind() {
+                    NUMBER => Some(LimitValue::Number(tokens[i + 1].text().to_string())),
+                    ALL_KW => Some(LimitValue::All),
+                    _ => None,
+                };
+            }
+        }
+        None
+    }
+
+    pub fn offset_value(&self) -> Option<String> {
+        let tokens: Vec<_> = self
+            .0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .collect();
+
+        for i in 0..tokens.len() {
+            if tokens[i].kind() == OFFSET_KW && i + 1 < tokens.len() && tokens[i + 1].kind() == NUMBER {
+                return Some(tokens[i + 1].text().to_string());
+            }
+        }
+        None
     }
 }

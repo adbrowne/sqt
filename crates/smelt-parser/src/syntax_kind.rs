@@ -36,6 +36,18 @@ pub enum SyntaxKind {
     EXISTS_KW,
     ANY_KW,
     SOME_KW,
+    // Phase 11: SQL clause keywords
+    ORDER_KW,
+    LIMIT_KW,
+    OFFSET_KW,
+    HAVING_KW,
+    DISTINCT_KW,
+    ALL_KW,
+    ASC_KW,
+    DESC_KW,
+    NULLS_KW,
+    FIRST_KW,
+    LAST_KW,
 
     // Operators & punctuation
     LPAREN,   // (
@@ -88,6 +100,11 @@ pub enum SyntaxKind {
     BETWEEN_EXPR,    // expr BETWEEN low AND high
     IN_EXPR,         // expr IN (values...)
     EXISTS_EXPR,     // EXISTS (subquery)
+    // Phase 11: SQL clause nodes
+    HAVING_CLAUSE,   // HAVING expression
+    ORDER_BY_CLAUSE, // ORDER BY column1, column2
+    ORDER_BY_ITEM,   // Single ORDER BY item with direction and null ordering
+    LIMIT_CLAUSE,    // LIMIT n OFFSET m
 
     // Error handling
     ERROR, // Invalid syntax
@@ -107,6 +124,8 @@ impl SyntaxKind {
             | CROSS_KW | ON_KW | USING_KW
             | CASE_KW | WHEN_KW | THEN_KW | ELSE_KW | END_KW | CAST_KW | BETWEEN_KW | IN_KW
             | EXISTS_KW | ANY_KW | SOME_KW
+            | ORDER_KW | LIMIT_KW | OFFSET_KW | HAVING_KW | DISTINCT_KW | ALL_KW | ASC_KW
+            | DESC_KW | NULLS_KW | FIRST_KW | LAST_KW
         )
     }
 
