@@ -13,10 +13,12 @@ pub mod syntax_kind;
 pub mod lexer;
 pub mod parser;
 pub mod ast;
+pub mod printer;
 
 pub use syntax_kind::SyntaxKind;
 pub use parser::{parse, Parse, ParseError};
 pub use ast::*;
+pub use printer::{FormatMode, FormatContext};
 
 /// Re-export Rowan types for convenience
 pub use rowan::TextRange;

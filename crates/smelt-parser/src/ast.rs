@@ -27,6 +27,12 @@ impl File {
             .filter_map(FunctionCall::cast)
             .filter_map(RefCall::from_function_call)
     }
+
+    /// Get the underlying syntax node (for printer)
+    #[allow(dead_code)] // Used by printer module
+    pub(crate) fn syntax(&self) -> &SyntaxNode {
+        &self.0
+    }
 }
 
 /// SELECT statement
@@ -75,6 +81,12 @@ impl SelectStmt {
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .any(|t| t.kind() == DISTINCT_KW)
+    }
+
+    /// Get the underlying syntax node (for printer)
+    #[allow(dead_code)] // Used by printer module
+    pub(crate) fn syntax(&self) -> &SyntaxNode {
+        &self.0
     }
 }
 
@@ -148,6 +160,12 @@ impl SelectItem {
     /// Get the text range of this select item
     pub fn range(&self) -> TextRange {
         self.0.text_range()
+    }
+
+    /// Get the underlying syntax node (for printer)
+    #[allow(dead_code)] // Used by printer module
+    pub(crate) fn syntax(&self) -> &SyntaxNode {
+        &self.0
     }
 }
 
@@ -312,6 +330,12 @@ impl TableRef {
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == IDENT)
             .map(|t| t.text().to_string())
+    }
+
+    /// Get the underlying syntax node (for printer)
+    #[allow(dead_code)] // Used by printer module
+    pub(crate) fn syntax(&self) -> &SyntaxNode {
+        &self.0
     }
 }
 
@@ -1096,6 +1120,12 @@ impl LimitClause {
             }
         }
         None
+    }
+
+    /// Get the underlying syntax node (for printer)
+    #[allow(dead_code)] // Used by printer module
+    pub(crate) fn syntax(&self) -> &SyntaxNode {
+        &self.0
     }
 }
 
