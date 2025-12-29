@@ -156,7 +156,7 @@ impl<'a> Parser<'a> {
 
     /// Check if current token can start an expression
     fn at_expression_start(&self) -> bool {
-        self.at_any(&[IDENT, NUMBER, STRING, LPAREN, NOT_KW])
+        self.at_any(&[IDENT, NUMBER, STRING, LPAREN, NOT_KW, CASE_KW, CAST_KW, EXISTS_KW])
     }
 
     // ===== Parsing rules =====
@@ -286,7 +286,25 @@ impl<'a> Parser<'a> {
         self.start_node(TABLE_REF);
         self.skip_trivia();
 
-        if self.at(IDENT) {
+        if self.at(LPAREN) {
+            // Could be a subquery
+            let checkpoint = self.builder.checkpoint();
+            self.advance(); // consume LPAREN
+            self.skip_trivia();
+
+            // Check if it's a subquery (starts with SELECT)
+            if self.at(SELECT_KW) {
+                self.start_node_at(checkpoint, SUBQUERY);
+                self.parse_select_stmt();
+                self.skip_trivia();
+                self.expect(RPAREN);
+                self.finish_node(); // Close SUBQUERY
+            } else {
+                // Not a subquery, error
+                self.error("Expected SELECT in subquery".to_string());
+                self.expect(RPAREN);
+            }
+        } else if self.at(IDENT) {
             // Use builder checkpoint for proper lookahead
             let checkpoint = self.builder.checkpoint();
             self.advance(); // Consume IDENT
@@ -529,10 +547,76 @@ impl<'a> Parser<'a> {
                     self.advance(); // consume NULL
                 }
                 self.finish_node();
+            } else if self.at(BETWEEN_KW) {
+                // BETWEEN low AND high
+                self.parse_between_expr();
+            } else if self.at(IN_KW) {
+                // IN (values...)
+                self.parse_in_expr();
             } else {
                 break;
             }
         }
+    }
+
+    fn parse_between_expr(&mut self) {
+        self.start_node(BETWEEN_EXPR);
+        self.expect(BETWEEN_KW);
+
+        // Parse lower bound
+        self.skip_trivia();
+        self.parse_additive_expr();
+
+        // Expect AND
+        self.skip_trivia();
+        if !self.expect(AND_KW) {
+            self.error("Expected AND in BETWEEN expression".to_string());
+        }
+
+        // Parse upper bound
+        self.skip_trivia();
+        self.parse_additive_expr();
+
+        self.finish_node();
+    }
+
+    fn parse_in_expr(&mut self) {
+        self.start_node(IN_EXPR);
+        self.expect(IN_KW);
+
+        self.skip_trivia();
+        if !self.expect(LPAREN) {
+            self.error("Expected '(' after IN".to_string());
+            self.finish_node();
+            return;
+        }
+
+        self.skip_trivia();
+
+        // Check if it's a subquery (starts with SELECT)
+        if self.at(SELECT_KW) {
+            self.parse_subquery();
+        } else {
+            // Parse comma-separated value list
+            loop {
+                self.skip_trivia();
+                if self.at(RPAREN) {
+                    break;
+                }
+
+                self.parse_expression();
+
+                self.skip_trivia();
+                if self.at(COMMA) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        self.expect(RPAREN);
+        self.finish_node();
     }
 
     fn parse_additive_expr(&mut self) {
@@ -548,31 +632,60 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_multiplicative_expr(&mut self) {
-        self.parse_primary_expr();
+        self.parse_unary_expr();
 
         while self.at_any(&[STAR, DIVIDE]) {
             self.start_node(BINARY_EXPR);
             self.advance();
             self.skip_trivia();
-            self.parse_primary_expr();
+            self.parse_unary_expr();
             self.finish_node();
+        }
+    }
+
+    fn parse_unary_expr(&mut self) {
+        self.skip_trivia();
+
+        // Handle unary operators (-, NOT)
+        if self.at_any(&[MINUS, NOT_KW]) {
+            self.start_node(BINARY_EXPR); // Reuse BINARY_EXPR for unary ops
+            self.advance(); // consume operator
+            self.skip_trivia();
+            self.parse_unary_expr(); // Allow chaining: --x
+            self.finish_node();
+        } else {
+            self.parse_primary_expr();
         }
     }
 
     fn parse_primary_expr(&mut self) {
         self.skip_trivia();
 
-        if self.at(LPAREN) {
-            // Parenthesized expression or function call
-            let _checkpoint = self.pos;
-            self.advance();
+        if self.at(CASE_KW) {
+            self.parse_case_expr();
+        } else if self.at(CAST_KW) {
+            self.parse_cast_expr();
+        } else if self.at(EXISTS_KW) {
+            self.parse_exists_expr();
+        } else if self.at(LPAREN) {
+            // Could be: parenthesized expression, subquery, or function call
+            let checkpoint = self.builder.checkpoint();
+            self.advance(); // consume LPAREN
             self.skip_trivia();
 
-            // Check if it's a function call (preceded by identifier)
-            // For now, just parse as grouped expression
-            self.parse_expression();
-            self.skip_trivia();
-            self.expect(RPAREN);
+            // Check if it's a subquery (starts with SELECT)
+            if self.at(SELECT_KW) {
+                self.start_node_at(checkpoint, SUBQUERY);
+                self.parse_select_stmt();
+                self.skip_trivia();
+                self.expect(RPAREN);
+                self.finish_node();
+            } else {
+                // Grouped expression
+                self.parse_expression();
+                self.skip_trivia();
+                self.expect(RPAREN);
+            }
         } else if self.at(IDENT) {
             // Could be column reference, qualified name, or function call
             let checkpoint = self.builder.checkpoint();
@@ -598,6 +711,13 @@ impl<'a> Parser<'a> {
                     self.finish_node();
                 }
                 // else: just a qualified name (table.column), no extra node needed
+            } else if self.at(DOUBLE_COLON) {
+                // PostgreSQL cast: expr::type
+                self.start_node_at(checkpoint, CAST_EXPR);
+                self.advance(); // consume ::
+                self.skip_trivia();
+                self.parse_type_spec();
+                self.finish_node();
             }
             // else: just an identifier, no extra node needed
         } else if self.current().is_literal() || self.at(STAR) {
@@ -605,6 +725,171 @@ impl<'a> Parser<'a> {
         } else {
             self.error(format!("Expected expression, found {:?}", self.current()));
         }
+    }
+
+    fn parse_case_expr(&mut self) {
+        self.start_node(CASE_EXPR);
+        self.expect(CASE_KW);
+
+        self.skip_trivia();
+
+        // Check if it's simple CASE (CASE expr WHEN ...) or searched CASE (CASE WHEN ...)
+        // If the next token after CASE is not WHEN, it's a simple CASE
+        let is_simple_case = !self.at(WHEN_KW);
+        if is_simple_case {
+            // Simple CASE - parse the case value expression
+            // Use a more restricted parse to avoid consuming the WHEN keyword
+            self.parse_additive_expr();
+            self.skip_trivia();
+        }
+
+        // Parse WHEN clauses
+        while self.at(WHEN_KW) {
+            self.parse_when_clause();
+            self.skip_trivia();
+        }
+
+        // Optional ELSE clause
+        if self.at(ELSE_KW) {
+            self.advance(); // consume ELSE
+            self.skip_trivia();
+            self.parse_expression();
+            self.skip_trivia();
+        }
+
+        // Expect END
+        if !self.expect(END_KW) {
+            self.error("Expected END to close CASE expression".to_string());
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_when_clause(&mut self) {
+        self.start_node(WHEN_CLAUSE);
+        self.expect(WHEN_KW);
+
+        // Parse condition or value (depends on simple vs searched CASE)
+        // Use comparison_expr to avoid consuming beyond THEN keyword
+        self.skip_trivia();
+        self.parse_comparison_expr();
+
+        // Expect THEN
+        self.skip_trivia();
+        if !self.expect(THEN_KW) {
+            self.error("Expected THEN in WHEN clause".to_string());
+        }
+
+        // Parse result - use comparison_expr to avoid consuming beyond WHEN/ELSE/END
+        self.skip_trivia();
+        self.parse_comparison_expr();
+
+        self.finish_node();
+    }
+
+    fn parse_cast_expr(&mut self) {
+        self.start_node(CAST_EXPR);
+        self.expect(CAST_KW);
+
+        self.skip_trivia();
+        if !self.expect(LPAREN) {
+            self.error("Expected '(' after CAST".to_string());
+            self.finish_node();
+            return;
+        }
+
+        // Parse expression to cast
+        self.skip_trivia();
+        self.parse_expression();
+
+        // Expect AS
+        self.skip_trivia();
+        if !self.expect(AS_KW) {
+            self.error("Expected AS in CAST expression".to_string());
+        }
+
+        // Parse type
+        self.skip_trivia();
+        self.parse_type_spec();
+
+        self.expect(RPAREN);
+        self.finish_node();
+    }
+
+    fn parse_type_spec(&mut self) {
+        self.start_node(TYPE_SPEC);
+
+        // Type name (identifier)
+        if !self.at(IDENT) {
+            self.error("Expected type name".to_string());
+            self.finish_node();
+            return;
+        }
+        self.advance();
+
+        // Optional type parameters: VARCHAR(255), DECIMAL(10,2), etc.
+        self.skip_trivia();
+        if self.at(LPAREN) {
+            self.advance(); // consume LPAREN
+
+            // Parse comma-separated parameters
+            loop {
+                self.skip_trivia();
+                if self.at(RPAREN) {
+                    break;
+                }
+
+                // Type parameters are typically numbers
+                if self.at(NUMBER) {
+                    self.advance();
+                } else if self.at(IDENT) {
+                    // Some types might have identifier parameters
+                    self.advance();
+                } else {
+                    self.error("Expected type parameter".to_string());
+                    break;
+                }
+
+                self.skip_trivia();
+                if self.at(COMMA) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+
+            self.expect(RPAREN);
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_subquery(&mut self) {
+        self.start_node(SUBQUERY);
+        self.parse_select_stmt();
+        self.finish_node();
+    }
+
+    fn parse_exists_expr(&mut self) {
+        self.start_node(EXISTS_EXPR);
+        self.expect(EXISTS_KW);
+
+        self.skip_trivia();
+        if !self.expect(LPAREN) {
+            self.error("Expected '(' after EXISTS".to_string());
+            self.finish_node();
+            return;
+        }
+
+        self.skip_trivia();
+        if self.at(SELECT_KW) {
+            self.parse_subquery();
+        } else {
+            self.error("Expected SELECT after EXISTS (".to_string());
+        }
+
+        self.expect(RPAREN);
+        self.finish_node();
     }
 
     fn parse_arg_list(&mut self) {
@@ -753,6 +1038,178 @@ mod tests {
         let parse = parse(input);
         assert!(!parse.errors.is_empty());
         assert!(parse.errors[0].message.contains("expression"));
+    }
+
+    // Phase 10: Expression Enhancement Tests
+
+    #[test]
+    fn test_case_searched() {
+        let input = "SELECT CASE WHEN status = 'active' THEN 1 WHEN status = 'pending' THEN 0 ELSE -1 END FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_case_simple() {
+        let input = "SELECT CASE status WHEN 'active' THEN 1 WHEN 'pending' THEN 0 ELSE -1 END FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_case_no_else() {
+        let input = "SELECT CASE WHEN status = 'active' THEN 1 END FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cast_standard() {
+        let input = "SELECT CAST(price AS INTEGER) FROM products";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cast_postgres_double_colon() {
+        let input = "SELECT price::INTEGER FROM products";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cast_with_params() {
+        let input = "SELECT CAST(name AS VARCHAR(255)) FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_cast_decimal() {
+        let input = "SELECT CAST(amount AS DECIMAL(10, 2)) FROM transactions";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_subquery_in_select() {
+        let input = "SELECT (SELECT COUNT(*) FROM orders WHERE user_id = users.id) AS order_count FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_subquery_in_from() {
+        let input = "SELECT * FROM (SELECT user_id, COUNT(*) AS cnt FROM orders GROUP BY user_id)";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_between() {
+        let input = "SELECT * FROM products WHERE price BETWEEN 10 AND 100";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_between_with_expressions() {
+        let input = "SELECT * FROM events WHERE created_at BETWEEN start_date AND end_date";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_in_values() {
+        let input = "SELECT * FROM users WHERE status IN ('active', 'pending')";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_in_numbers() {
+        let input = "SELECT * FROM products WHERE category_id IN (1, 2, 3, 5, 8)";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_in_subquery() {
+        let input = "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total > 100)";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_exists() {
+        let input = "SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_complex_nested_expressions() {
+        let input = "SELECT CASE WHEN price::DECIMAL > 100 THEN 'expensive' ELSE 'cheap' END FROM products WHERE category_id IN (1, 2, 3)";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_unary_minus() {
+        let input = "SELECT -1 FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
     }
 
 }
