@@ -1,3 +1,4 @@
 target/
 .cargo-cache/
 .claude/
+!.claude/settings.json
