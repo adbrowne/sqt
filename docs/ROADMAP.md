@@ -4,7 +4,9 @@ This document tracks the implementation status of smelt, aligned with the spec i
 
 ## Current Status
 
-**Multi-Backend Architecture with Basic Incremental Materialization Complete**: Parser, LSP, multi-backend CLI with DuckDB and Spark (stub) implementations, and basic incremental materialization support.
+**YAML Frontmatter Metadata Support Complete (December 31, 2025)**: Models can now specify configuration inline using YAML frontmatter, with SQL metadata taking precedence over smelt.yml.
+
+**Multi-Backend Architecture with Basic Incremental Materialization Complete (December 27, 2024)**: Parser, LSP, multi-backend CLI with DuckDB and Spark (stub) implementations, and basic incremental materialization support.
 
 ```sql
 -- ✅ Supported syntax (parser & LSP)
@@ -35,6 +37,166 @@ targets:
     catalog: spark_catalog
     schema: production
 ```
+
+---
+
+## ✅ Phase 16: YAML Frontmatter Metadata Support (COMPLETED)
+
+**Completed**: December 31, 2025
+
+### What Was Implemented
+
+- **YAML frontmatter metadata extraction** in SQL files
+  - `crates/smelt-cli/src/metadata.rs` - Complete frontmatter parsing (~370 lines)
+  - `extract_file_metadata()` - Parse YAML frontmatter from SQL files
+  - `ModelMetadata` struct - All metadata fields (materialization, incremental, tags, owner, description)
+  - Single-model files: `--- ... ---` wrapping YAML
+  - Multi-model files: `--- name: model_name ---` section delimiters
+  - Backward compatible - files without frontmatter still work
+
+- **Configuration precedence system**
+  - **SQL file metadata > smelt.yml > defaults**
+  - `Config::get_materialization_with_metadata()` - Check SQL first, fall back to YAML
+  - `Config::get_incremental_with_metadata()` - SQL wins for incremental config
+  - `ModelFile.metadata` field - Stores extracted metadata during discovery
+
+- **End-to-end integration**
+  - `discovery.rs` - Extract metadata when discovering models
+  - `compiler.rs` - Use metadata when compiling models
+  - `main.rs` - Check metadata for incremental execution
+  - Example: `examples/models/user_summary.sql` with frontmatter
+
+- **Comprehensive test coverage**
+  - 13 new unit tests in `metadata.rs`
+  - Tests for single-model, multi-model, error recovery
+  - Backward compatibility tests
+  - All 168 tests passing across workspace
+
+### Implementation Details
+
+**Metadata Format (Single-Model):**
+```sql
+---
+name: daily_revenue
+materialization: table
+incremental:
+  enabled: true
+  event_time_column: transaction_timestamp
+  partition_column: revenue_date
+tags: [revenue, core]
+owner: analytics-team
+description: Daily revenue aggregation
+---
+
+SELECT DATE(transaction_timestamp) as revenue_date, ...
+```
+
+**Metadata Format (Multi-Model):**
+```sql
+--- name: model1 ---
+materialization: table
+---
+SELECT ...
+
+--- name: model2 ---
+materialization: view
+---
+SELECT ...
+```
+
+**Supported Metadata Fields:**
+- `name` (string) - Model name (optional in single-model, required in multi-model)
+- `materialization` (`table` | `view`) - How to materialize
+- `incremental` (object) - Incremental config (enabled, event_time_column, partition_column)
+- `tags` (array) - Organization tags
+- `owner` (string) - Team/person responsible
+- `description` (string) - Model documentation
+- `backend_hints` (object) - Backend-specific settings (forward compatibility)
+- `custom` (object) - Custom fields (forward compatibility)
+
+**Error Handling:**
+- Malformed YAML → diagnostic, fall back to treating file as SQL
+- Missing required fields → validation errors
+- Invalid section delimiters → error recovery at sync points
+
+### Design Decisions
+
+**Post-parse extraction** (not in lexer/parser):
+- Keeps parser focused on SQL syntax only
+- Better error recovery (YAML errors don't break SQL parsing)
+- No circular dependencies between crates
+- Metadata extraction is CLI/LSP concern, not parser concern
+
+**Boxed metadata** in ModelFile:
+- Large enum variant warning fixed by boxing `ModelMetadata`
+- Reduces stack allocation overhead
+
+**SQL-first precedence**:
+- Inline configuration closer to code
+- Easier to understand model behavior
+- Gradual migration path from smelt.yml
+
+### Updated Files
+
+1. **crates/smelt-cli/src/metadata.rs** (NEW, 470 lines)
+   - Core extraction logic with comprehensive tests
+
+2. **crates/smelt-cli/src/config.rs** (MODIFIED)
+   - Added `get_materialization_with_metadata()`
+   - Added `get_incremental_with_metadata()`
+   - Added `PartialEq` to `IncrementalConfig`
+
+3. **crates/smelt-cli/src/discovery.rs** (MODIFIED)
+   - Added `metadata` field to `ModelFile`
+   - Extract metadata during model discovery
+   - Handle multi-model files
+
+4. **crates/smelt-cli/src/compiler.rs** (MODIFIED)
+   - Use metadata when determining materialization
+   - Both `compile()` and `compile_with_sql()` updated
+
+5. **crates/smelt-cli/src/main.rs** (MODIFIED)
+   - Use metadata for incremental config lookup
+
+6. **crates/smelt-cli/src/lib.rs** (MODIFIED)
+   - Export metadata types
+
+7. **README.md** (MODIFIED)
+   - New "Model Configuration" section with frontmatter examples
+   - Updated Quick Example with frontmatter
+   - Configuration precedence documentation
+
+8. **examples/models/user_summary.sql** (MODIFIED)
+   - Added frontmatter example
+
+### Test Results
+
+All 168 tests passing:
+- 37 smelt-cli tests (including 13 new metadata tests)
+- 88 smelt-parser tests
+- 10 smelt-db tests
+- 5 smelt-backend-duckdb tests
+- 2 smelt-backend-spark tests
+- 20 property-based tests
+- 6 integration tests
+
+Cargo clippy passes with no warnings.
+
+### Future Work (Not Implemented)
+
+**Comment Annotations** (Phase 17):
+- Extract `-- @key: value` annotations from SQL comments
+- Attach to models and columns
+- LSP hover/diagnostics for annotations
+
+**LSP Metadata Validation** (Phase 17):
+- Real-time diagnostics for invalid YAML
+- Autocomplete for metadata keys
+- Quick fixes for common mistakes
+
+**Multi-Model Discovery** (Future):
+- Currently only single-model per file fully supported
+- Multi-model parsing works but discovery needs enhancement
 
 ---
 

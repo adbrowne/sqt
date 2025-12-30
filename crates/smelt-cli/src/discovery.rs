@@ -4,6 +4,8 @@ use smelt_parser::File as AstFile;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+use crate::metadata::{extract_file_metadata, FileMetadata, ModelMetadata};
+
 #[derive(Debug, Clone)]
 pub struct ModelFile {
     pub name: String,
@@ -11,6 +13,8 @@ pub struct ModelFile {
     pub content: String,
     pub refs: Vec<RefInfo>,
     pub parse_errors: Vec<smelt_parser::ParseError>,
+    /// Metadata extracted from YAML frontmatter
+    pub metadata: Option<Box<ModelMetadata>>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,16 +73,40 @@ impl ModelDiscovery {
     }
 
     fn parse_model_file(&self, path: &Path) -> Result<ModelFile> {
-        // Model name from filename (e.g., models/user_sessions.sql -> user_sessions)
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| anyhow!("Invalid filename: {:?}", path))?
-            .to_string();
-
         // Read file content
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read model file: {:?}", path))?;
+
+        // Extract metadata from YAML frontmatter
+        let file_metadata = extract_file_metadata(&content).ok();
+        let model_metadata = match file_metadata {
+            Some(FileMetadata::Single { metadata, .. }) => Some(metadata),
+            Some(FileMetadata::Multi { models }) => {
+                // For multi-model files, we need to handle each model separately
+                // For now, just use the first model's metadata if it matches the filename
+                let filename_stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string());
+
+                models
+                    .into_iter()
+                    .find(|section| section.metadata.name.as_ref() == filename_stem.as_ref())
+                    .map(|section| Box::new(section.metadata))
+            }
+            Some(FileMetadata::Empty) | None => None,
+        };
+
+        // Determine model name: from metadata if present, otherwise from filename
+        let name = model_metadata
+            .as_ref()
+            .and_then(|m| m.name.clone())
+            .or_else(|| {
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+            })
+            .ok_or_else(|| anyhow!("Cannot determine model name from {:?}", path))?;
 
         // Parse using smelt-parser
         let parse = smelt_parser::parse(&content);
@@ -96,6 +124,7 @@ impl ModelDiscovery {
             content,
             refs,
             parse_errors: parse.errors,
+            metadata: model_metadata,
         })
     }
 }

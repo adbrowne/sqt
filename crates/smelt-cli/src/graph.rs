@@ -175,6 +175,7 @@ mod tests {
             content: String::new(),
             refs,
             parse_errors: Vec::new(),
+            metadata: None,
         }
     }
 

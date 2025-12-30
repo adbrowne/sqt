@@ -73,10 +73,16 @@ impl SqlCompiler {
         // Use AST-based replacement with precise byte offsets
         let compiled_sql = replace_refs_with_ranges(&model.content, &refs, schema);
 
+        // Get materialization: SQL metadata > smelt.yml > default
+        let materialization = self.config.get_materialization_with_metadata(
+            &model.name,
+            model.metadata.as_ref().map(|b| b.as_ref()),
+        );
+
         Ok(CompiledModel {
             name: model.name.clone(),
             sql: compiled_sql,
-            materialization: self.config.get_materialization(&model.name),
+            materialization,
         })
     }
 
@@ -107,10 +113,16 @@ impl SqlCompiler {
         // Use AST-based replacement with precise byte offsets
         let compiled_sql = replace_refs_with_ranges(sql, &refs, schema);
 
+        // Get materialization: SQL metadata > smelt.yml > default
+        let materialization = self.config.get_materialization_with_metadata(
+            &model.name,
+            model.metadata.as_ref().map(|b| b.as_ref()),
+        );
+
         Ok(CompiledModel {
             name: model.name.clone(),
             sql: compiled_sql,
-            materialization: self.config.get_materialization(&model.name),
+            materialization,
         })
     }
 }
@@ -179,6 +191,7 @@ GROUP BY user_id
             content: sql.to_string(),
             refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
+            metadata: None,
         };
 
         let config = make_test_config();
@@ -204,6 +217,7 @@ JOIN smelt.ref('model_b') b ON a.id = b.id
             content: sql.to_string(),
             refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
+            metadata: None,
         };
 
         let config = make_test_config();
@@ -229,6 +243,7 @@ FROM smelt.ref('raw_events', filter => event_type = 'page_view')
             content: sql.to_string(),
             refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
+            metadata: None,
         };
 
         let config = make_test_config();
@@ -250,6 +265,7 @@ FROM smelt.ref('raw_events', filter => event_type = 'page_view')
             content: "SELECT 1".to_string(),
             refs: vec![],
             parse_errors: Vec::new(),
+            metadata: None,
         };
 
         let mut config = make_test_config();
@@ -277,6 +293,7 @@ FROM smelt.ref('raw_events', filter => event_type = 'page_view')
             content: sql.to_string(),
             refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
+            metadata: None,
         };
 
         let config = make_test_config();
@@ -298,6 +315,7 @@ FROM smelt.ref('raw_events', filter => event_type = 'page_view')
             content: sql.to_string(),
             refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
+            metadata: None,
         };
 
         let config = make_test_config();
@@ -323,6 +341,7 @@ JOIN smelt.ref('model_a') b ON a.parent_id = b.id
             content: sql.to_string(),
             refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
+            metadata: None,
         };
 
         let config = make_test_config();
@@ -351,6 +370,7 @@ WHERE event_type = 'click'
             content: sql.to_string(),
             refs: extract_refs_from_sql(sql),
             parse_errors: Vec::new(),
+            metadata: None,
         };
 
         let config = make_test_config();
