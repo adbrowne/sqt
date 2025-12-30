@@ -508,6 +508,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-targets 0.52.6",
 ]
@@ -1667,6 +1668,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_distr"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
+dependencies = [
+ "num-traits",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "rand_xorshift"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2103,6 +2114,25 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "rowan",
+]
+
+[[package]]
+name = "smelt-testdata"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "async-trait",
+ "chrono",
+ "rand 0.8.5",
+ "rand_distr",
+ "serde",
+ "serde_json",
+ "smelt-backend",
+ "smelt-backend-duckdb",
+ "tempfile",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

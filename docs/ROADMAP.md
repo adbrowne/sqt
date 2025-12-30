@@ -4,7 +4,7 @@ This document tracks the implementation status of smelt, aligned with the spec i
 
 ## Current Status
 
-**Multi-Backend Architecture with Basic Incremental Materialization Complete**: Parser, LSP, multi-backend CLI with DuckDB and Spark (stub) implementations, and basic incremental materialization support.
+**Multi-Backend Architecture with Basic Incremental Materialization Complete**: Parser, LSP, multi-backend CLI with DuckDB and Spark (stub) implementations, basic incremental materialization support, and test data generation infrastructure (`smelt-testdata` crate).
 
 ```sql
 -- ✅ Supported syntax (parser & LSP)
@@ -1155,6 +1155,134 @@ Implemented PostgreSQL-specific SQL syntax extensions to expand parser capabilit
 **Effort**: Medium-High (3-5 days)
 
 **Dependencies**: Requires schema metadata from database or model definitions
+
+---
+
+## ✅ Test Data Generation Infrastructure (COMPLETED)
+
+**Completed**: December 30, 2024
+
+### What Was Implemented
+
+New crate **smelt-testdata** for generating realistic, deterministic test data for behavioral analytics scenarios. Inspired by property-based testing libraries (QuickCheck, Hedgehog) but focused on volume generation.
+
+#### Core Components
+
+1. **Generator Trait** (`core.rs`) - Composable data generation
+   - `Generator<T>` trait with `generate(&self, rng: &mut StdRng) -> T`
+   - Combinators: `map()`, `filter()`, `flat_map()`
+   - Built-in generators: `Constant`, `UniformU32/F64`, `OneOf`, `WeightedChoice`
+   - Dyn-compatible using `StdRng` for boxed generators
+
+2. **SeededRngFactory** (`rng.rs`) - Deterministic RNG management
+   - Named streams for independent reproducible sequences
+   - Same seed always produces identical output
+   - `stream("visitors")` creates named RNG stream
+
+3. **Distribution Models** (`distributions.rs`) - Realistic patterns
+   - `PowerLaw` - Long-tail distributions (Pareto)
+   - `VisitorFrequencyModel` - Power users (5%), regular (20%), occasional (35%), one-time (40%)
+   - `PlatformAffinityModel` - Single platform (70%), dual (25%), multi (5%)
+   - `EventCountModel` - Events per session with power law
+
+4. **Data Generation** (`generator.rs`)
+   - `Visitor` - visitor_id, platforms[], expected_visits, first_seen
+   - `Session` - session_id, visitor_id, platform, start_time, duration_minutes
+   - `Event` - event_id, session_id, visitor_id, event_type, timestamp, platform, properties
+   - `TestDataGenerator` - Orchestrates generation from config
+
+5. **Output Formats** (`output.rs`)
+   - `SqlOutput` - INSERT statements with batching for setup scripts
+   - `ArrowOutput` - Arrow RecordBatches for direct backend integration
+
+6. **Backend Integration** (`backend_integration.rs`)
+   - `TestDataLoader` trait extension for `Backend` trait
+   - `load_test_data()` - Load all tables into database
+   - Works with DuckDB, Spark, or any Backend implementation
+
+7. **Presets** (`presets.rs`) - Ready-to-use configurations
+   - `unit_test()` - ~100 visitors, ~1K events
+   - `integration_test()` - ~1K visitors, ~50K events
+   - `performance_test()` - ~10K visitors, ~500K events
+   - `ecommerce()`, `saas()`, `media()` - Domain-specific event types
+   - `high_churn()`, `high_engagement()`, `mobile_first()`, `web_first()`
+
+#### Builder Pattern API
+
+```rust
+use smelt_testdata::{TestDataBuilder, TestDataGenerator, TestDataLoader};
+
+let config = TestDataBuilder::new()
+    .seed(42)                    // Reproducible
+    .visitors(1000)              // Volume control
+    .last_n_days(30)             // Time range
+    .ecommerce_events()          // E-commerce funnel events
+    .mobile_first()              // Mobile-heavy platform distribution
+    .build();
+
+let data = TestDataGenerator::new(config).generate();
+println!("{}", data.summary()); // "Generated 1000 visitors, X sessions, Y events"
+
+// Load directly into DuckDB
+let backend = DuckDbBackend::new(path, "analytics").await?;
+backend.load_test_data("analytics", &data).await?;
+```
+
+### Dependencies
+
+```toml
+[dependencies]
+rand = "0.8"
+rand_distr = "0.4"
+chrono = "0.4"
+arrow.workspace = true
+smelt-backend = { path = "../smelt-backend" }
+async-trait = "0.1"
+```
+
+### Example
+
+Run `cargo run -p smelt-testdata --example generate_events` to:
+1. Generate 500 visitors over 30 days with e-commerce events
+2. Load into DuckDB (creates `testdata_example.duckdb`)
+3. Run analytics queries (platform distribution, funnel, engagement tiers)
+4. Display sample data and statistics
+
+### Test Results
+
+- 45 unit tests passing
+- 6 doc-tests passing
+- Zero clippy warnings
+- Determinism verified (same seed = identical output)
+
+### Design Decisions
+
+**Generator trait vs proptest Strategy**:
+- Generator focuses on volume generation, not shrinking
+- Uses concrete `StdRng` type for dyn-compatibility
+- Simpler API for test data use case
+
+**Seeded RNG factory with named streams**:
+- Ensures output stability across code changes
+- Independent streams for visitors, sessions, events
+- Adding new generators doesn't affect existing sequences
+
+**Power law distributions**:
+- Realistic "long tail" patterns (few power users, many occasional visitors)
+- Configurable alpha parameter controls tail heaviness
+- Min/max bounds for practical limits
+
+**SQL + Arrow output**:
+- SQL for easy setup scripts and debugging
+- Arrow for efficient direct backend loading
+- Both deterministic from same seed
+
+### Future Enhancements
+
+- **YAML Configuration**: Define generation parameters in config file
+- **Custom generators**: Plugin system for domain-specific data
+- **CLI integration**: `smelt generate-testdata` command
+- **Streaming generation**: Generate data without full materialization
 
 ---
 
