@@ -4,6 +4,7 @@ pub mod discovery;
 pub mod errors;
 pub mod executor;
 pub mod graph;
+pub mod metadata;
 pub mod transformer;
 
 pub use compiler::{CompiledModel, SqlCompiler};
@@ -13,4 +14,5 @@ pub use config::{
 pub use discovery::{ModelDiscovery, ModelFile, RefInfo};
 pub use errors::CliError;
 pub use graph::DependencyGraph;
+pub use metadata::{extract_file_metadata, FileMetadata, MetadataError, ModelMetadata};
 pub use transformer::{inject_time_filter, TimeRange, TransformError};

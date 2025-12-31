@@ -100,7 +100,7 @@ pub struct ModelConfig {
     pub incremental: Option<IncrementalConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct IncrementalConfig {
     pub enabled: bool,
     /// Column in source data to filter on (for WHERE injection)
@@ -127,6 +127,9 @@ impl Config {
         })
     }
 
+    /// Get materialization for a model
+    ///
+    /// **Precedence**: SQL file metadata > smelt.yml model config > default_materialization
     pub fn get_materialization(&self, model_name: &str) -> Materialization {
         self.models
             .get(model_name)
@@ -134,12 +137,54 @@ impl Config {
             .unwrap_or_else(|| self.default_materialization.clone())
     }
 
+    /// Get materialization with SQL metadata precedence
+    ///
+    /// **Precedence**: SQL file metadata > smelt.yml model config > default_materialization
+    pub fn get_materialization_with_metadata(
+        &self,
+        model_name: &str,
+        sql_metadata: Option<&crate::metadata::ModelMetadata>,
+    ) -> Materialization {
+        // Check SQL metadata first
+        if let Some(metadata) = sql_metadata {
+            if let Some(materialization) = &metadata.materialization {
+                return materialization.clone();
+            }
+        }
+
+        // Fall back to smelt.yml
+        self.get_materialization(model_name)
+    }
+
     /// Get incremental config for a model if enabled
+    ///
+    /// **Precedence**: smelt.yml only (for now)
     pub fn get_incremental(&self, model_name: &str) -> Option<&IncrementalConfig> {
         self.models
             .get(model_name)
             .and_then(|m| m.incremental.as_ref())
             .filter(|i| i.enabled)
+    }
+
+    /// Get incremental config with SQL metadata precedence
+    ///
+    /// **Precedence**: SQL file metadata > smelt.yml model config
+    pub fn get_incremental_with_metadata<'a>(
+        &'a self,
+        model_name: &str,
+        sql_metadata: Option<&'a crate::metadata::ModelMetadata>,
+    ) -> Option<&'a IncrementalConfig> {
+        // Check SQL metadata first
+        if let Some(metadata) = sql_metadata {
+            if let Some(ref incremental) = metadata.incremental {
+                if incremental.enabled {
+                    return Some(incremental);
+                }
+            }
+        }
+
+        // Fall back to smelt.yml
+        self.get_incremental(model_name)
     }
 }
 

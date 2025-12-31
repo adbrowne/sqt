@@ -242,7 +242,9 @@ async fn run(args: RunArgs) -> Result<()> {
         let model = graph.get_model(model_name)?;
 
         // Check if this model should be run incrementally
-        let inc_config = config.get_incremental(model_name);
+        // SQL metadata takes precedence over smelt.yml
+        let inc_config = config
+            .get_incremental_with_metadata(model_name, model.metadata.as_ref().map(|b| b.as_ref()));
         let is_incremental = time_range.is_some() && inc_config.is_some();
 
         if is_incremental {
