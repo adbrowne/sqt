@@ -8,6 +8,13 @@ use smelt_backend::{Backend, BackendCapabilities, BackendError, PartitionSpec, S
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+/// Options for bulk loading data.
+#[derive(Debug, Clone, Default)]
+pub struct BulkLoadOptions {
+    /// Whether to checkpoint after loading (reduces WAL size, recommended for large loads)
+    pub checkpoint: bool,
+}
+
 /// DuckDB backend for smelt.
 ///
 /// Wraps a DuckDB connection and implements the Backend trait.
@@ -55,6 +62,85 @@ impl DuckDbBackend {
         .map_err(|e| BackendError::connection_failed(e.to_string()))?;
 
         Ok(Self { connection, schema })
+    }
+
+    /// Bulk load Arrow RecordBatches into a table using DuckDB's Appender API.
+    ///
+    /// This is MUCH faster than INSERT statements for large datasets.
+    /// The table must already exist with a compatible schema.
+    ///
+    /// # Example
+    /// ```ignore
+    /// backend.bulk_load_arrow("schema", "table", &batches, BulkLoadOptions { checkpoint: true }).await?;
+    /// ```
+    pub async fn bulk_load_arrow(
+        &self,
+        schema: &str,
+        table: &str,
+        batches: &[RecordBatch],
+        options: BulkLoadOptions,
+    ) -> Result<usize, BackendError> {
+        if batches.is_empty() {
+            return Ok(0);
+        }
+
+        let connection = Arc::clone(&self.connection);
+        let schema = schema.to_string();
+        let table = table.to_string();
+        let batches: Vec<RecordBatch> = batches.to_vec();
+        let checkpoint = options.checkpoint;
+
+        tokio::task::spawn_blocking(move || {
+            let conn = connection.lock().unwrap();
+            let table_path = format!("{}.{}", schema, table);
+
+            // Create appender for the table
+            // appender_to_db takes (table, schema) - we pass just table name and our schema
+            let mut appender = conn
+                .appender_to_db(&table, &schema)
+                .map_err(|e| BackendError::execution_failed(&table_path, e.to_string()))?;
+
+            let mut total_rows = 0usize;
+
+            // Append each batch
+            for batch in &batches {
+                appender
+                    .append_record_batch(batch.clone())
+                    .map_err(|e| BackendError::execution_failed(&table_path, e.to_string()))?;
+                total_rows += batch.num_rows();
+            }
+
+            // Flush the appender
+            appender
+                .flush()
+                .map_err(|e| BackendError::execution_failed(&table_path, e.to_string()))?;
+
+            // Checkpoint to reduce WAL size if requested
+            if checkpoint {
+                conn.execute("CHECKPOINT", [])
+                    .map_err(|e| BackendError::execution_failed("checkpoint", e.to_string()))?;
+            }
+
+            Ok(total_rows)
+        })
+        .await
+        .map_err(|e| BackendError::Other(e.into()))?
+    }
+
+    /// Force a checkpoint to flush WAL to disk.
+    ///
+    /// Call this periodically during large bulk loads to prevent WAL buildup.
+    pub async fn checkpoint(&self) -> Result<(), BackendError> {
+        let connection = Arc::clone(&self.connection);
+
+        tokio::task::spawn_blocking(move || {
+            let conn = connection.lock().unwrap();
+            conn.execute("CHECKPOINT", [])
+                .map_err(|e| BackendError::execution_failed("checkpoint", e.to_string()))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| BackendError::Other(e.into()))?
     }
 
     /// Check if a table exists in the information schema.
