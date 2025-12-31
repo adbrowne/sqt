@@ -5,6 +5,7 @@ use crate::core::{Generator, WeightedChoice};
 use crate::distributions::Platform;
 use crate::rng::SeededRngFactory;
 use chrono::{DateTime, Duration, Utc};
+use rand::rngs::StdRng;
 use rand::Rng;
 use std::collections::HashMap;
 
@@ -239,6 +240,243 @@ impl TestDataGenerator {
     /// Get the configuration used by this generator.
     pub fn config(&self) -> &TestDataConfig {
         &self.config
+    }
+
+    /// Create a streaming batch iterator that generates data in chunks.
+    ///
+    /// This is much more memory-efficient for large datasets as it only
+    /// holds one batch in memory at a time.
+    ///
+    /// # Arguments
+    /// * `visitor_batch_size` - Number of visitors to process per batch
+    ///
+    /// # Example
+    /// ```ignore
+    /// let generator = TestDataGenerator::new(config);
+    /// for batch in generator.stream_batches(10_000) {
+    ///     // batch.visitors, batch.sessions, batch.events
+    ///     // Load into database...
+    /// }
+    /// ```
+    pub fn stream_batches(self, visitor_batch_size: usize) -> StreamingBatchIterator {
+        StreamingBatchIterator::new(self, visitor_batch_size)
+    }
+}
+
+/// A batch of generated data from streaming generation.
+#[derive(Debug)]
+pub struct GeneratedBatch {
+    /// Batch number (0-indexed)
+    pub batch_index: usize,
+    /// Total number of batches expected
+    pub total_batches: usize,
+    /// Generated visitors in this batch
+    pub visitors: Vec<Visitor>,
+    /// Generated sessions for this batch's visitors
+    pub sessions: Vec<Session>,
+    /// Generated events for this batch's sessions
+    pub events: Vec<Event>,
+}
+
+impl GeneratedBatch {
+    /// Get a summary of this batch.
+    pub fn summary(&self) -> String {
+        format!(
+            "Batch {}/{}: {} visitors, {} sessions, {} events",
+            self.batch_index + 1,
+            self.total_batches,
+            self.visitors.len(),
+            self.sessions.len(),
+            self.events.len()
+        )
+    }
+}
+
+/// Iterator that generates test data in batches for streaming processing.
+///
+/// This allows processing large datasets without holding everything in memory.
+pub struct StreamingBatchIterator {
+    config: TestDataConfig,
+    visitor_batch_size: usize,
+    current_visitor_index: u64,
+    current_session_counter: u64,
+    current_event_counter: u64,
+    total_visitors: u64,
+    total_batches: usize,
+    current_batch: usize,
+    // Cached RNGs
+    visitor_rng: StdRng,
+    session_rng: StdRng,
+    event_rng: StdRng,
+}
+
+impl StreamingBatchIterator {
+    fn new(generator: TestDataGenerator, visitor_batch_size: usize) -> Self {
+        let total_visitors = generator.config.visitors.count as u64;
+        let total_batches = (total_visitors as usize).div_ceil(visitor_batch_size);
+
+        Self {
+            visitor_rng: generator.rng_factory.stream("visitors"),
+            session_rng: generator.rng_factory.stream("sessions"),
+            event_rng: generator.rng_factory.stream("events"),
+            config: generator.config,
+            visitor_batch_size,
+            current_visitor_index: 0,
+            current_session_counter: 0,
+            current_event_counter: 0,
+            total_visitors,
+            total_batches,
+            current_batch: 0,
+        }
+    }
+
+    /// Get progress as (current_batch, total_batches)
+    pub fn progress(&self) -> (usize, usize) {
+        (self.current_batch, self.total_batches)
+    }
+
+    /// Generate visitors for a batch range
+    fn generate_visitor_batch(&mut self, start: u64, count: u64) -> Vec<Visitor> {
+        let period_days = self.config.time_range.num_days() as u32;
+        let frequency_gen = self
+            .config
+            .visitors
+            .frequency_model
+            .visit_count_generator(period_days);
+
+        let time_range = &self.config.time_range;
+        let range_millis = time_range.duration().num_milliseconds();
+        let range_start = time_range.start;
+
+        (start..start + count)
+            .map(|i| {
+                let platforms = self
+                    .config
+                    .visitors
+                    .platform_model
+                    .generate_platforms(&mut self.visitor_rng);
+                let expected_visits = frequency_gen.generate(&mut self.visitor_rng);
+                let first_seen = if range_millis <= 0 {
+                    range_start
+                } else {
+                    let offset = self.visitor_rng.gen_range(0..range_millis);
+                    range_start + Duration::milliseconds(offset)
+                };
+
+                Visitor {
+                    visitor_id: format!("v_{:08x}", i),
+                    platforms,
+                    expected_visits,
+                    first_seen,
+                }
+            })
+            .collect()
+    }
+
+    /// Generate sessions for a batch of visitors
+    fn generate_sessions_for_visitors(&mut self, visitors: &[Visitor]) -> Vec<Session> {
+        let mut sessions = Vec::new();
+
+        for visitor in visitors {
+            let time_available = self.config.time_range.end - visitor.first_seen;
+            let time_available_ms = time_available.num_milliseconds().max(1);
+
+            for _ in 0..visitor.expected_visits {
+                let platform_idx = self.session_rng.gen_range(0..visitor.platforms.len());
+                let platform = visitor.platforms[platform_idx].clone();
+
+                let offset_ms = self.session_rng.gen_range(0..time_available_ms);
+                let start_time = visitor.first_seen + Duration::milliseconds(offset_ms);
+
+                let (min_dur, max_dur) = self.config.events.session_duration_minutes;
+                let duration_minutes = self.session_rng.gen_range(min_dur..max_dur);
+
+                sessions.push(Session {
+                    session_id: format!("s_{:012x}", self.current_session_counter),
+                    visitor_id: visitor.visitor_id.clone(),
+                    platform,
+                    start_time,
+                    duration_minutes,
+                });
+
+                self.current_session_counter += 1;
+            }
+        }
+
+        sessions
+    }
+
+    /// Generate events for a batch of sessions
+    fn generate_events_for_sessions(&mut self, sessions: &[Session]) -> Vec<Event> {
+        let events_per_session = self.config.events.events_per_session.generator();
+        let event_type_gen = WeightedChoice::new(self.config.events.event_types.clone());
+
+        let mut events = Vec::new();
+
+        for session in sessions {
+            let num_events = events_per_session.generate(&mut self.event_rng);
+            let session_duration_ms = (session.duration_minutes * 60.0 * 1000.0) as i64;
+
+            for i in 0..num_events {
+                let offset_ratio = if num_events > 1 {
+                    i as f64 / (num_events - 1) as f64
+                } else {
+                    0.0
+                };
+                let offset_ms = (session_duration_ms as f64 * offset_ratio) as i64;
+                let jitter = if session_duration_ms > 0 {
+                    self.event_rng.gen_range(0..session_duration_ms.min(1000))
+                } else {
+                    0
+                };
+                let timestamp = session.start_time + Duration::milliseconds(offset_ms + jitter);
+
+                events.push(Event {
+                    event_id: format!("e_{:016x}", self.current_event_counter),
+                    session_id: session.session_id.clone(),
+                    visitor_id: session.visitor_id.clone(),
+                    event_type: event_type_gen.generate(&mut self.event_rng),
+                    timestamp,
+                    platform: session.platform.clone(),
+                    properties: HashMap::new(),
+                });
+
+                self.current_event_counter += 1;
+            }
+        }
+
+        events
+    }
+}
+
+impl Iterator for StreamingBatchIterator {
+    type Item = GeneratedBatch;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_visitor_index >= self.total_visitors {
+            return None;
+        }
+
+        let remaining = self.total_visitors - self.current_visitor_index;
+        let batch_size = (remaining as usize).min(self.visitor_batch_size) as u64;
+
+        // Generate this batch
+        let visitors = self.generate_visitor_batch(self.current_visitor_index, batch_size);
+        let sessions = self.generate_sessions_for_visitors(&visitors);
+        let events = self.generate_events_for_sessions(&sessions);
+
+        let batch = GeneratedBatch {
+            batch_index: self.current_batch,
+            total_batches: self.total_batches,
+            visitors,
+            sessions,
+            events,
+        };
+
+        self.current_visitor_index += batch_size;
+        self.current_batch += 1;
+
+        Some(batch)
     }
 }
 

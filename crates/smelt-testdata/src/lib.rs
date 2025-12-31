@@ -92,14 +92,17 @@ pub mod presets;
 pub mod rng;
 
 // Re-export main types for convenience
-pub use backend_integration::{TestDataLoadResult, TestDataLoader};
+pub use backend_integration::{BatchLoadResult, TestDataLoadResult, TestDataLoader};
 pub use builder::TestDataBuilder;
 pub use config::{EventConfig, SchemaConfig, TestDataConfig, TimeRange, VisitorConfig};
 pub use core::{Generator, GeneratorExt};
 pub use distributions::{
     EventCountModel, Platform, PlatformAffinityModel, PowerLaw, VisitorFrequencyModel,
 };
-pub use generator::{Event, GeneratedData, Session, TestDataGenerator, Visitor};
+pub use generator::{
+    Event, GeneratedBatch, GeneratedData, Session, StreamingBatchIterator, TestDataGenerator,
+    Visitor,
+};
 pub use output::{ArrowOutput, SqlOutput};
 pub use rng::SeededRngFactory;
 

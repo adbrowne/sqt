@@ -1,6 +1,6 @@
 //! Backend integration for loading test data.
 
-use crate::generator::GeneratedData;
+use crate::generator::{GeneratedBatch, GeneratedData};
 use crate::output::SqlOutput;
 use async_trait::async_trait;
 use smelt_backend::{Backend, BackendError};
@@ -52,6 +52,29 @@ pub trait TestDataLoader: Backend {
         schema: &str,
         events: &[crate::generator::Event],
     ) -> Result<usize, BackendError>;
+
+    /// Load a single batch of generated data.
+    ///
+    /// Use this with `stream_batches()` for streaming large datasets:
+    /// ```ignore
+    /// // Create tables first
+    /// backend.create_test_tables(schema).await?;
+    ///
+    /// // Stream batches
+    /// for batch in generator.stream_batches(10_000) {
+    ///     backend.load_batch(schema, &batch).await?;
+    /// }
+    /// ```
+    async fn load_batch(
+        &self,
+        schema: &str,
+        batch: &GeneratedBatch,
+    ) -> Result<BatchLoadResult, BackendError>;
+
+    /// Create the test data tables (visitors, sessions, events) without loading data.
+    ///
+    /// Call this once before streaming batches.
+    async fn create_test_tables(&self, schema: &str) -> Result<(), BackendError>;
 }
 
 /// Result of loading test data.
@@ -63,6 +86,42 @@ pub struct TestDataLoadResult {
     pub sessions_loaded: usize,
     /// Number of events loaded
     pub events_loaded: usize,
+}
+
+/// Result of loading a single batch.
+#[derive(Debug, Clone)]
+pub struct BatchLoadResult {
+    /// Batch index that was loaded
+    pub batch_index: usize,
+    /// Total batches expected
+    pub total_batches: usize,
+    /// Number of visitors loaded in this batch
+    pub visitors_loaded: usize,
+    /// Number of sessions loaded in this batch
+    pub sessions_loaded: usize,
+    /// Number of events loaded in this batch
+    pub events_loaded: usize,
+}
+
+impl BatchLoadResult {
+    /// Get the total number of rows loaded in this batch.
+    pub fn total_rows(&self) -> usize {
+        self.visitors_loaded + self.sessions_loaded + self.events_loaded
+    }
+}
+
+impl std::fmt::Display for BatchLoadResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Batch {}/{}: {} visitors, {} sessions, {} events",
+            self.batch_index + 1,
+            self.total_batches,
+            self.visitors_loaded,
+            self.sessions_loaded,
+            self.events_loaded
+        )
+    }
 }
 
 impl TestDataLoadResult {
@@ -160,5 +219,106 @@ impl<B: Backend + ?Sized> TestDataLoader for B {
         }
 
         Ok(events.len())
+    }
+
+    async fn create_test_tables(&self, schema: &str) -> Result<(), BackendError> {
+        // Ensure schema exists
+        self.ensure_schema(schema).await?;
+
+        // Create tables (same DDL as SqlOutput but just the CREATE statements)
+        self.execute_sql(&format!(
+            "CREATE TABLE IF NOT EXISTS {}.visitors (
+                visitor_id VARCHAR PRIMARY KEY,
+                first_seen TIMESTAMP,
+                platforms VARCHAR
+            );",
+            schema
+        ))
+        .await?;
+
+        self.execute_sql(&format!(
+            "CREATE TABLE IF NOT EXISTS {}.sessions (
+                session_id VARCHAR PRIMARY KEY,
+                visitor_id VARCHAR,
+                platform VARCHAR,
+                start_time TIMESTAMP,
+                duration_minutes DOUBLE
+            );",
+            schema
+        ))
+        .await?;
+
+        self.execute_sql(&format!(
+            "CREATE TABLE IF NOT EXISTS {}.events (
+                event_id VARCHAR PRIMARY KEY,
+                session_id VARCHAR,
+                visitor_id VARCHAR,
+                event_type VARCHAR,
+                timestamp TIMESTAMP,
+                platform VARCHAR
+            );",
+            schema
+        ))
+        .await?;
+
+        Ok(())
+    }
+
+    async fn load_batch(
+        &self,
+        schema: &str,
+        batch: &GeneratedBatch,
+    ) -> Result<BatchLoadResult, BackendError> {
+        let sql_output = SqlOutput::new(schema);
+
+        // Load visitors (data only, tables already created)
+        let visitors_loaded = if !batch.visitors.is_empty() {
+            let sql = sql_output.format_visitors_data_only(&batch.visitors);
+            for statement in sql.split(";\n").filter(|s| !s.trim().is_empty()) {
+                let stmt = statement.trim();
+                if !stmt.is_empty() {
+                    self.execute_sql(&format!("{};", stmt)).await?;
+                }
+            }
+            batch.visitors.len()
+        } else {
+            0
+        };
+
+        // Load sessions (data only)
+        let sessions_loaded = if !batch.sessions.is_empty() {
+            let sql = sql_output.format_sessions_data_only(&batch.sessions);
+            for statement in sql.split(";\n").filter(|s| !s.trim().is_empty()) {
+                let stmt = statement.trim();
+                if !stmt.is_empty() {
+                    self.execute_sql(&format!("{};", stmt)).await?;
+                }
+            }
+            batch.sessions.len()
+        } else {
+            0
+        };
+
+        // Load events (data only)
+        let events_loaded = if !batch.events.is_empty() {
+            let sql = sql_output.format_events_data_only(&batch.events);
+            for statement in sql.split(";\n").filter(|s| !s.trim().is_empty()) {
+                let stmt = statement.trim();
+                if !stmt.is_empty() {
+                    self.execute_sql(&format!("{};", stmt)).await?;
+                }
+            }
+            batch.events.len()
+        } else {
+            0
+        };
+
+        Ok(BatchLoadResult {
+            batch_index: batch.batch_index,
+            total_batches: batch.total_batches,
+            visitors_loaded,
+            sessions_loaded,
+            events_loaded,
+        })
     }
 }

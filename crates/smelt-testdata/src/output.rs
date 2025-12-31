@@ -184,6 +184,109 @@ impl SqlOutput {
         sql.push_str(&self.format_events(events));
         sql
     }
+
+    /// Format visitors as INSERT statements only (no CREATE TABLE).
+    /// Used for streaming batch loading where tables are pre-created.
+    pub fn format_visitors_data_only(&self, visitors: &[Visitor]) -> String {
+        if visitors.is_empty() {
+            return String::new();
+        }
+
+        let mut sql = String::new();
+        for chunk in visitors.chunks(self.batch_size) {
+            sql.push_str(&format!(
+                "INSERT INTO {}.visitors (visitor_id, first_seen, platforms) VALUES\n",
+                self.schema
+            ));
+
+            let values: Vec<String> = chunk
+                .iter()
+                .map(|v| {
+                    let platforms: Vec<&str> = v.platforms.iter().map(|p| p.as_str()).collect();
+                    format!(
+                        "('{}', '{}', '{}')",
+                        v.visitor_id,
+                        v.first_seen.format("%Y-%m-%d %H:%M:%S"),
+                        platforms.join(",")
+                    )
+                })
+                .collect();
+
+            sql.push_str(&values.join(",\n"));
+            sql.push_str(";\n\n");
+        }
+
+        sql
+    }
+
+    /// Format sessions as INSERT statements only (no CREATE TABLE).
+    pub fn format_sessions_data_only(&self, sessions: &[Session]) -> String {
+        if sessions.is_empty() {
+            return String::new();
+        }
+
+        let mut sql = String::new();
+        for chunk in sessions.chunks(self.batch_size) {
+            sql.push_str(&format!(
+                "INSERT INTO {}.sessions (session_id, visitor_id, platform, start_time, duration_minutes) VALUES\n",
+                self.schema
+            ));
+
+            let values: Vec<String> = chunk
+                .iter()
+                .map(|s| {
+                    format!(
+                        "('{}', '{}', '{}', '{}', {:.2})",
+                        s.session_id,
+                        s.visitor_id,
+                        s.platform.as_str(),
+                        s.start_time.format("%Y-%m-%d %H:%M:%S"),
+                        s.duration_minutes
+                    )
+                })
+                .collect();
+
+            sql.push_str(&values.join(",\n"));
+            sql.push_str(";\n\n");
+        }
+
+        sql
+    }
+
+    /// Format events as INSERT statements only (no CREATE TABLE).
+    pub fn format_events_data_only(&self, events: &[Event]) -> String {
+        if events.is_empty() {
+            return String::new();
+        }
+
+        let mut sql = String::new();
+        for chunk in events.chunks(self.batch_size) {
+            sql.push_str(&format!(
+                "INSERT INTO {}.events (event_id, session_id, visitor_id, event_type, timestamp, platform) VALUES\n",
+                self.schema
+            ));
+
+            let values: Vec<String> = chunk
+                .iter()
+                .map(|e| {
+                    format!(
+                        "('{}', '{}', '{}', '{}', '{}', '{}')",
+                        e.event_id,
+                        e.session_id,
+                        e.visitor_id,
+                        e.event_type,
+                        e.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        e.platform.as_str()
+                    )
+                })
+                .collect();
+
+            sql.push_str(&values.join(",\n"));
+            sql.push_str(";\n\n");
+        }
+
+        sql
+    }
 }
 
 // ----------------------------------------------------------------------------
