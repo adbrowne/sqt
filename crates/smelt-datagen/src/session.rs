@@ -260,6 +260,7 @@ impl SessionGenerator {
 }
 
 /// Iterator that yields sessions in batches.
+/// Each session can have multiple categories, yielding multiple rows with the same session_id.
 pub struct SessionIterator {
     config: SessionGenerator,
     rng: ChaCha8Rng,
@@ -269,6 +270,8 @@ pub struct SessionIterator {
     daily_visitor_pos: usize,
     sessions_per_visitor: usize,
     session_in_visit: usize,
+    /// Pending category rows for current session
+    pending_categories: Vec<Session>,
 }
 
 impl SessionIterator {
@@ -285,6 +288,7 @@ impl SessionIterator {
             daily_visitor_pos: 0,
             sessions_per_visitor: 0,
             session_in_visit: 0,
+            pending_categories: Vec::new(),
         }
     }
 
@@ -320,6 +324,11 @@ impl Iterator for SessionIterator {
     type Item = Session;
 
     fn next(&mut self) -> Option<Session> {
+        // First, return any pending category rows
+        if let Some(session) = self.pending_categories.pop() {
+            return Some(session);
+        }
+
         if self.sessions_generated >= self.config.target_sessions {
             return None;
         }
@@ -385,47 +394,85 @@ impl Iterator for SessionIterator {
         // Widget views: log-normal, median ~5
         let widget_views = log_normal(5.0, 1.0, 100).generate(&mut self.rng);
 
-        // Product views: log-normal, median ~3
-        let product_views = log_normal(3.0, 1.0, 50).generate(&mut self.rng);
-
-        let product_category = product_category_gen().generate(&mut self.rng);
-
-        // Purchase: 80% zero, otherwise geometric
-        let product_purchase_count = if self.rng.gen_bool(0.80) {
-            0
-        } else {
-            geometric(0.5).generate(&mut self.rng) + 1
-        };
-
-        // Revenue based on purchase count and category price
-        let product_revenue = if product_purchase_count > 0 {
-            let base_price = product_category.avg_price();
-            // Add some variance: 0.5x to 1.5x base price
-            let price_factor = self.rng.gen_range(0.5..1.5);
-            (product_purchase_count as f64 * base_price as f64 * price_factor) as i32
-        } else {
-            0
-        };
-
         let session_date =
             self.config.start_date + chrono::Duration::days((self.current_day - 1) as i64);
+
+        // Generate 1-4 categories for this session (average ~2)
+        // Distribution: 30% get 1, 40% get 2, 20% get 3, 10% get 4
+        let num_categories = {
+            let r: f64 = self.rng.gen();
+            if r < 0.30 {
+                1
+            } else if r < 0.70 {
+                2
+            } else if r < 0.90 {
+                3
+            } else {
+                4
+            }
+        };
+
+        // Select distinct categories for this session
+        // There are 6 categories total, so num_categories (1-4) is always achievable
+        let mut selected_categories: Vec<ProductCategory> = Vec::with_capacity(num_categories);
+        while selected_categories.len() < num_categories {
+            let cat = product_category_gen().generate(&mut self.rng);
+            if !selected_categories.contains(&cat) {
+                selected_categories.push(cat);
+            }
+        }
+
+        // Generate a row for each category
+        let mut first_session: Option<Session> = None;
+        for (i, &product_category) in selected_categories.iter().enumerate() {
+            // Product views: log-normal, median ~3 (split across categories)
+            let product_views =
+                log_normal(3.0 / num_categories as f64, 1.0, 50).generate(&mut self.rng);
+
+            // Purchase: 80% zero, otherwise geometric
+            let product_purchase_count = if self.rng.gen_bool(0.80) {
+                0
+            } else {
+                geometric(0.5).generate(&mut self.rng) + 1
+            };
+
+            // Revenue based on purchase count and category price
+            let product_revenue = if product_purchase_count > 0 {
+                let base_price = product_category.avg_price();
+                // Add some variance: 0.5x to 1.5x base price
+                let price_factor = self.rng.gen_range(0.5..1.5);
+                (product_purchase_count as f64 * base_price as f64 * price_factor) as i32
+            } else {
+                0
+            };
+
+            let session = Session {
+                visitor_id: visitor.id,
+                session_id,
+                platform,
+                visit_source,
+                visit_campaign: visit_campaign.clone(),
+                widget_views,
+                session_date,
+                product_views,
+                product_category,
+                product_revenue,
+                product_purchase_count,
+            };
+
+            if i == 0 {
+                // First category will be returned directly
+                first_session = Some(session);
+            } else {
+                // Additional categories go to pending
+                self.pending_categories.push(session);
+            }
+        }
 
         self.session_in_visit += 1;
         self.sessions_generated += 1;
 
-        Some(Session {
-            visitor_id: visitor.id,
-            session_id,
-            platform,
-            visit_source,
-            visit_campaign,
-            widget_views,
-            session_date,
-            product_views,
-            product_category,
-            product_revenue,
-            product_purchase_count,
-        })
+        first_session
     }
 }
 
