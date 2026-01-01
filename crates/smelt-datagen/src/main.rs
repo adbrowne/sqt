@@ -67,7 +67,7 @@ fn main() -> Result<()> {
             last_print.set(elapsed);
             let pct = (current as f64 / total as f64) * 100.0;
             let rate = current as f64 / elapsed.max(1) as f64;
-            let eta = if rate > 0.0 {
+            let eta = if rate > 0.0 && current < total {
                 ((total - current) as f64 / rate) as u64
             } else {
                 0
