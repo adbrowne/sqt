@@ -1,0 +1,24 @@
+[package]
+name = "smelt-datagen"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Deterministic data generation for smelt"
+
+[dependencies]
+rand.workspace = true
+rand_chacha.workspace = true
+rand_distr.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+clap.workspace = true
+duckdb.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "smelt-datagen"
+path = "src/main.rs"
