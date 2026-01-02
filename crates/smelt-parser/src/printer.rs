@@ -623,4 +623,92 @@ mod tests {
         // Regression test for fuzzer crash with mixed-case WHERE keyword
         assert_round_trip("SELECT x FROM t WHERE y = 1");
     }
+
+    // ===== Mixed-case keyword regression tests =====
+    // These tests verify that round-trip works correctly regardless of keyword casing.
+    // SQL keywords are case-insensitive, so the parser accepts any casing.
+    // The printer normalizes to uppercase.
+
+    #[test]
+    fn test_mixed_case_where_actual() {
+        // The original bug: mixed-case WHERE like "WhErE" would crash
+        assert_round_trip("SELECT x FROM t WhErE y = 1");
+    }
+
+    #[test]
+    fn test_mixed_case_select() {
+        assert_round_trip("sElEcT * FROM users");
+    }
+
+    #[test]
+    fn test_mixed_case_from() {
+        assert_round_trip("SELECT * fRoM users");
+    }
+
+    #[test]
+    fn test_mixed_case_inner_join() {
+        assert_round_trip("SELECT * FROM a InNeR jOiN b ON a.id = b.id");
+    }
+
+    #[test]
+    fn test_mixed_case_left_join() {
+        assert_round_trip("SELECT * FROM a LeFt JoIn b ON a.id = b.id");
+    }
+
+    #[test]
+    fn test_mixed_case_group_by() {
+        assert_round_trip("SELECT city FROM users GrOuP bY city");
+    }
+
+    #[test]
+    fn test_mixed_case_order_by() {
+        assert_round_trip("SELECT * FROM users OrDeR bY name");
+    }
+
+    #[test]
+    fn test_mixed_case_order_by_asc_desc() {
+        assert_round_trip("SELECT * FROM users ORDER BY name AsC, age DeSc");
+    }
+
+    #[test]
+    fn test_mixed_case_having() {
+        assert_round_trip("SELECT city, COUNT(*) FROM users GROUP BY city HaViNg COUNT(*) > 5");
+    }
+
+    #[test]
+    fn test_mixed_case_limit() {
+        assert_round_trip("SELECT * FROM users LiMiT 10");
+    }
+
+    #[test]
+    fn test_mixed_case_limit_offset() {
+        assert_round_trip("SELECT * FROM users LIMIT 10 oFfSeT 5");
+    }
+
+    #[test]
+    fn test_mixed_case_distinct() {
+        assert_round_trip("SELECT DiStInCt city FROM users");
+    }
+
+    #[test]
+    fn test_mixed_case_with_cte() {
+        assert_round_trip("WiTh cte aS (SELECT 1) SELECT * FROM cte");
+    }
+
+    #[test]
+    fn test_mixed_case_on_using() {
+        assert_round_trip("SELECT * FROM a JOIN b On a.id = b.id");
+        assert_round_trip("SELECT * FROM a JOIN b UsInG (id)");
+    }
+
+    #[test]
+    fn test_mixed_case_nulls_first_last() {
+        assert_round_trip("SELECT * FROM users ORDER BY name NuLlS FiRsT");
+        assert_round_trip("SELECT * FROM users ORDER BY name NULLS lAsT");
+    }
+
+    #[test]
+    fn test_mixed_case_and_or() {
+        assert_round_trip("SELECT * FROM users WHERE a = 1 AnD b = 2 oR c = 3");
+    }
 }
