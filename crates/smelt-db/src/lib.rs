@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use serde::Deserialize;
 use smelt_parser::{self, File as AstFile, RefCall};
 
 pub mod schema;
@@ -22,6 +23,10 @@ pub trait Inputs {
     /// Get all file paths in the project
     #[salsa::input]
     fn all_files(&self) -> Arc<Vec<PathBuf>>;
+
+    /// Get the raw YAML content of sources.yml
+    #[salsa::input]
+    fn sources_yaml(&self) -> Arc<String>;
 }
 
 /// Syntax queries - parsing and CST construction
@@ -37,6 +42,12 @@ pub trait Syntax: Inputs {
     /// Extract all ref() calls from a model with their positions
     fn model_refs(&self, path: PathBuf) -> Arc<Vec<RefLocation>>;
 
+    /// Extract all source() calls from a model with their positions
+    fn model_sources(&self, path: PathBuf) -> Arc<Vec<SourceLocation>>;
+
+    /// Parse sources.yml into structured config
+    fn sources_config(&self) -> Arc<SourcesConfig>;
+
     /// Get all models in the project
     fn all_models(&self) -> Arc<HashMap<PathBuf, Model>>;
 }
@@ -47,6 +58,10 @@ pub trait Semantic: Syntax {
     /// Resolve a ref() to the file path where it's defined
     /// Returns None if the ref is undefined
     fn resolve_ref(&self, model_name: String) -> Option<PathBuf>;
+
+    /// Resolve a source() to its table definition
+    /// Returns None if the source is undefined
+    fn resolve_source(&self, source_name: String, table_name: String) -> Option<SourceTableDef>;
 
     /// Get all diagnostics for a file
     fn file_diagnostics(&self, path: PathBuf) -> Arc<Vec<Diagnostic>>;
@@ -121,6 +136,48 @@ fn model_refs(db: &dyn Syntax, path: PathBuf) -> Arc<Vec<RefLocation>> {
     }
 }
 
+fn model_sources(db: &dyn Syntax, path: PathBuf) -> Arc<Vec<SourceLocation>> {
+    let parse = db.parse_file(path.clone());
+    let text = db.file_text(path);
+    let syntax = parse.syntax();
+
+    if let Some(file) = AstFile::cast(syntax) {
+        let sources: Vec<SourceLocation> = file
+            .sources()
+            .filter_map(|source_call| {
+                let qualified_name = source_call.qualified_name()?;
+                let source_name = source_call.source_name()?;
+                let table_name = source_call.table_name()?;
+                let text_range = source_call.name_range().unwrap_or(source_call.range());
+                let range = smelt_parser::ast::text_range_to_range(&text, text_range);
+
+                Some(SourceLocation {
+                    source_name,
+                    table_name,
+                    qualified_name,
+                    range,
+                })
+            })
+            .collect();
+
+        Arc::new(sources)
+    } else {
+        Arc::new(Vec::new())
+    }
+}
+
+fn sources_config(db: &dyn Syntax) -> Arc<SourcesConfig> {
+    let yaml = db.sources_yaml();
+    if yaml.is_empty() {
+        return Arc::new(SourcesConfig::default());
+    }
+
+    match serde_yaml::from_str::<SourcesConfig>(&yaml) {
+        Ok(config) => Arc::new(config),
+        Err(_) => Arc::new(SourcesConfig::default()),
+    }
+}
+
 fn all_models(db: &dyn Syntax) -> Arc<HashMap<PathBuf, Model>> {
     let files = db.all_files();
     let mut models = HashMap::new();
@@ -142,6 +199,20 @@ fn resolve_ref(db: &dyn Semantic, model_name: String) -> Option<PathBuf> {
         .iter()
         .find(|(_, model)| model.name == model_name)
         .map(|(path, _)| path.clone())
+}
+
+fn resolve_source(
+    db: &dyn Semantic,
+    source_name: String,
+    table_name: String,
+) -> Option<SourceTableDef> {
+    let config = db.sources_config();
+
+    // Find the source with this name
+    let source = config.sources.iter().find(|s| s.name == source_name)?;
+
+    // Find the table within the source
+    source.tables.iter().find(|t| t.name == table_name).cloned()
 }
 
 fn file_diagnostics(db: &dyn Semantic, path: PathBuf) -> Arc<Vec<Diagnostic>> {
@@ -192,6 +263,24 @@ fn file_diagnostics(db: &dyn Semantic, path: PathBuf) -> Arc<Vec<Diagnostic>> {
         }
     }
 
+    // Check for undefined sources with accurate positions
+    let sources = db.model_sources(path.clone());
+    for source_loc in sources.iter() {
+        if db
+            .resolve_source(
+                source_loc.source_name.clone(),
+                source_loc.table_name.clone(),
+            )
+            .is_none()
+        {
+            diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                message: format!("Undefined source: '{}'", source_loc.qualified_name),
+                range: source_loc.range,
+            });
+        }
+    }
+
     Arc::new(diagnostics)
 }
 
@@ -207,6 +296,123 @@ pub struct Model {
 pub struct RefLocation {
     pub name: String,
     pub range: Range,
+}
+
+/// Source location with position information
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceLocation {
+    pub source_name: String,
+    pub table_name: String,
+    pub qualified_name: String,
+    pub range: Range,
+}
+
+/// Sources configuration from sources.yml
+/// Supports nested object format like dbt:
+/// ```yaml
+/// sources:
+///   raw:
+///     tables:
+///       users:
+///         columns: [...]
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourcesConfig {
+    pub sources: Vec<SourceDef>,
+}
+
+impl<'de> Deserialize<'de> for SourcesConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Raw YAML structure with nested objects
+        #[derive(Deserialize)]
+        struct RawConfig {
+            #[serde(default)]
+            sources: HashMap<String, RawSourceDef>,
+        }
+
+        #[derive(Deserialize)]
+        struct RawSourceDef {
+            #[serde(default)]
+            database: Option<String>,
+            #[serde(default)]
+            schema: Option<String>,
+            #[serde(default)]
+            description: Option<String>,
+            #[serde(default)]
+            tables: HashMap<String, RawTableDef>,
+        }
+
+        #[derive(Deserialize)]
+        struct RawTableDef {
+            #[serde(default)]
+            identifier: Option<String>,
+            #[serde(default)]
+            description: Option<String>,
+            #[serde(default)]
+            columns: Vec<SourceColumnDef>,
+        }
+
+        let raw = RawConfig::deserialize(deserializer)?;
+
+        let sources = raw
+            .sources
+            .into_iter()
+            .map(|(name, raw_source)| {
+                let tables = raw_source
+                    .tables
+                    .into_iter()
+                    .map(|(table_name, raw_table)| SourceTableDef {
+                        name: table_name,
+                        identifier: raw_table.identifier,
+                        description: raw_table.description,
+                        columns: raw_table.columns,
+                    })
+                    .collect();
+
+                SourceDef {
+                    name,
+                    database: raw_source.database,
+                    schema: raw_source.schema,
+                    description: raw_source.description,
+                    tables,
+                }
+            })
+            .collect();
+
+        Ok(SourcesConfig { sources })
+    }
+}
+
+/// Source definition (a named source with tables)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceDef {
+    pub name: String,
+    pub database: Option<String>,
+    pub schema: Option<String>,
+    pub description: Option<String>,
+    pub tables: Vec<SourceTableDef>,
+}
+
+/// Table definition within a source
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceTableDef {
+    pub name: String,
+    pub identifier: Option<String>,
+    pub description: Option<String>,
+    pub columns: Vec<SourceColumnDef>,
+}
+
+/// Column definition within a source table
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct SourceColumnDef {
+    pub name: String,
+    #[serde(default, rename = "type")]
+    pub data_type: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// Position in a file (line, column)

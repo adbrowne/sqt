@@ -28,6 +28,14 @@ impl File {
             .filter_map(RefCall::from_function_call)
     }
 
+    /// Find all source('source.table') function calls in the file
+    pub fn sources(&self) -> impl Iterator<Item = SourceCall> + '_ {
+        self.0
+            .descendants()
+            .filter_map(FunctionCall::cast)
+            .filter_map(SourceCall::from_function_call)
+    }
+
     /// Get the underlying syntax node (for printer)
     #[allow(dead_code)] // Used by printer module
     pub(crate) fn syntax(&self) -> &SyntaxNode {
@@ -728,6 +736,68 @@ impl RefCall {
     /// Get all named parameters from this ref call
     pub fn named_params(&self) -> impl Iterator<Item = NamedParam> + '_ {
         self.0.named_params()
+    }
+}
+
+/// source('source.table') function call wrapper
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SourceCall(FunctionCall);
+
+impl SourceCall {
+    /// Create a SourceCall from a FunctionCall if it's a smelt.source() call
+    pub fn from_function_call(func: FunctionCall) -> Option<Self> {
+        let name = func.name()?.to_lowercase();
+        let namespace = func.namespace()?;
+
+        if name == "source" && namespace.to_lowercase() == "smelt" {
+            Some(Self(func))
+        } else {
+            None
+        }
+    }
+
+    /// Get the qualified name from the source call (e.g., "raw.users")
+    pub fn qualified_name(&self) -> Option<String> {
+        self.0
+             .0
+            .descendants_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == STRING)
+            .map(|t| {
+                let text = t.text();
+                text.trim_start_matches('\'')
+                    .trim_start_matches('"')
+                    .trim_end_matches('\'')
+                    .trim_end_matches('"')
+                    .to_string()
+            })
+    }
+
+    /// Get the source name (first part before the dot)
+    pub fn source_name(&self) -> Option<String> {
+        let qualified = self.qualified_name()?;
+        qualified.split('.').next().map(|s| s.to_string())
+    }
+
+    /// Get the table name (second part after the dot)
+    pub fn table_name(&self) -> Option<String> {
+        let qualified = self.qualified_name()?;
+        qualified.split('.').nth(1).map(|s| s.to_string())
+    }
+
+    /// Get the text range of the entire source call
+    pub fn range(&self) -> TextRange {
+        self.0 .0.text_range()
+    }
+
+    /// Get the text range of just the qualified name string
+    pub fn name_range(&self) -> Option<TextRange> {
+        self.0
+             .0
+            .descendants_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == STRING)
+            .map(|t| t.text_range())
     }
 }
 
