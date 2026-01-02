@@ -72,6 +72,13 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Initialize all_files to empty first - ensures Salsa query is always set
+        // even if workspace folders aren't provided or models/ doesn't exist
+        {
+            let mut db = self.db.lock().await;
+            db.set_all_files(Arc::new(Vec::new()));
+        }
+
         // Get workspace folders if provided
         if let Some(workspace_folders) = params.workspace_folders {
             let mut db = self.db.lock().await;

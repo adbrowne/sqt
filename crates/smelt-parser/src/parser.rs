@@ -1157,6 +1157,12 @@ impl<'a> Parser<'a> {
     fn parse_argument(&mut self) {
         self.skip_trivia();
 
+        // Handle DISTINCT/ALL modifiers for aggregate functions: COUNT(DISTINCT col)
+        if self.at(DISTINCT_KW) || self.at(ALL_KW) {
+            self.advance(); // consume DISTINCT or ALL
+            self.skip_trivia();
+        }
+
         // Check for named parameter: IDENT => expression
         // Allow keywords to be used as parameter names (e.g., filter => ...)
         if self.at(IDENT) || self.current().is_keyword() {
@@ -1778,6 +1784,26 @@ mod tests {
     #[test]
     fn test_distinct() {
         let input = "SELECT DISTINCT city FROM users";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_count_distinct() {
+        let input = "SELECT COUNT(DISTINCT session_id) FROM events";
+        let parse = parse(input);
+        if !parse.errors.is_empty() {
+            eprintln!("Errors: {:?}", parse.errors);
+        }
+        assert_eq!(parse.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_count_all() {
+        let input = "SELECT COUNT(ALL user_id) FROM events";
         let parse = parse(input);
         if !parse.errors.is_empty() {
             eprintln!("Errors: {:?}", parse.errors);
