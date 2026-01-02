@@ -110,11 +110,13 @@ impl Display for SelectStmt {
         // WHERE clause
         if let Some(where_clause) = self.where_clause() {
             let full_text = where_clause.text();
-            // Remove the "WHERE" keyword from the text
-            let expr_text = full_text
-                .trim_start_matches("WHERE")
-                .trim_start_matches("where")
-                .trim();
+            // Remove the "WHERE" keyword from the text (case-insensitive)
+            let expr_text = if full_text.len() >= 5 && full_text[..5].eq_ignore_ascii_case("WHERE")
+            {
+                full_text[5..].trim()
+            } else {
+                full_text.trim()
+            };
             write!(f, " WHERE {}", expr_text)?;
         }
 
@@ -614,5 +616,11 @@ mod tests {
     #[test]
     fn test_select_group_by_having() {
         assert_round_trip("SELECT city, COUNT(*) FROM users GROUP BY city HAVING COUNT(*) > 5");
+    }
+
+    #[test]
+    fn test_round_trip_mixed_case_where() {
+        // Regression test for fuzzer crash with mixed-case WHERE keyword
+        assert_round_trip("SELECT x FROM t WHERE y = 1");
     }
 }
