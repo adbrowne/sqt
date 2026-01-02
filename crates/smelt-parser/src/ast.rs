@@ -355,12 +355,18 @@ impl WhereClause {
         }
     }
 
+    /// Get the expression in this WHERE clause
+    pub fn expression(&self) -> Option<Expr> {
+        self.0.children().find_map(Expr::cast)
+    }
+
     /// Get the text range of this WHERE clause
     pub fn text_range(&self) -> TextRange {
         self.0.text_range()
     }
 
     /// Get the full text of this WHERE clause
+    #[allow(dead_code)] // Keep for debugging, but prefer expression()
     pub fn text(&self) -> String {
         self.0.text().to_string()
     }

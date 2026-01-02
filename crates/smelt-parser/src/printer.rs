@@ -109,15 +109,9 @@ impl Display for SelectStmt {
 
         // WHERE clause
         if let Some(where_clause) = self.where_clause() {
-            let full_text = where_clause.text();
-            // Remove the "WHERE" keyword from the text (case-insensitive)
-            let expr_text = if full_text.len() >= 5 && full_text[..5].eq_ignore_ascii_case("WHERE")
-            {
-                full_text[5..].trim()
-            } else {
-                full_text.trim()
-            };
-            write!(f, " WHERE {}", expr_text)?;
+            if let Some(expr) = where_clause.expression() {
+                write!(f, " WHERE {}", expr.text())?;
+            }
         }
 
         // GROUP BY clause
