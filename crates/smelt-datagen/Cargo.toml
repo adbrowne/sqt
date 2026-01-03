@@ -13,7 +13,9 @@ rand_distr.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 clap.workspace = true
-duckdb.workspace = true
+arrow.workspace = true
+parquet.workspace = true
+rayon.workspace = true
 anyhow.workspace = true
 
 [dev-dependencies]

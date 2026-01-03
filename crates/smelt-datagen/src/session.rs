@@ -3,8 +3,9 @@
 use crate::gen::Gen;
 use crate::generators::*;
 use chrono::NaiveDate;
-use rand::Rng;
+use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Platform types for sessions.
@@ -123,6 +124,215 @@ pub struct Session {
     pub product_purchase_count: i32,
 }
 
+/// Shared visitor pool that can be cloned across parallel workers.
+#[derive(Clone)]
+pub struct VisitorPool {
+    visitors: Arc<Vec<Visitor>>,
+}
+
+impl VisitorPool {
+    /// Create a visitor pool from a seed.
+    pub fn new(seed: u64, target_sessions: usize) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        // Assume average 3-7 sessions per visitor over the period
+        let num_visitors = target_sessions / 5;
+        let visitors = generate_visitors(&mut rng, num_visitors);
+        Self {
+            visitors: Arc::new(visitors),
+        }
+    }
+
+    /// Get the number of visitors in the pool.
+    pub fn len(&self) -> usize {
+        self.visitors.len()
+    }
+
+    /// Check if the pool is empty.
+    pub fn is_empty(&self) -> bool {
+        self.visitors.is_empty()
+    }
+}
+
+/// Generate deterministic per-day seeds from a root seed.
+pub fn generate_day_seeds(root_seed: u64, num_days: u32) -> Vec<u64> {
+    // Use offset to ensure these seeds don't overlap with visitor pool generation
+    let mut rng = ChaCha8Rng::seed_from_u64(root_seed.wrapping_add(1000));
+    (0..num_days).map(|_| rng.next_u64()).collect()
+}
+
+/// Configuration for generating a single day's sessions.
+pub struct DayGenerator {
+    visitor_pool: VisitorPool,
+    day_seed: u64,
+    date: NaiveDate,
+    sessions_per_day: usize,
+}
+
+impl DayGenerator {
+    /// Create a new day generator.
+    pub fn new(
+        visitor_pool: VisitorPool,
+        day_seed: u64,
+        date: NaiveDate,
+        sessions_per_day: usize,
+    ) -> Self {
+        Self {
+            visitor_pool,
+            day_seed,
+            date,
+            sessions_per_day,
+        }
+    }
+
+    /// Generate all sessions for this day, returning a Vec.
+    pub fn generate(&self) -> Vec<Session> {
+        let mut rng = ChaCha8Rng::seed_from_u64(self.day_seed);
+        let mut sessions = Vec::new();
+
+        // Sample visitors for this day based on return probability
+        let mut daily_visitor_indices: Vec<usize> = Vec::new();
+
+        for (idx, visitor) in self.visitor_pool.visitors.iter().enumerate() {
+            // Higher return probability = more likely to visit any given day
+            let daily_visit_prob = 0.05 + visitor.return_probability * 0.15;
+            if rng.gen_bool(daily_visit_prob.min(1.0)) {
+                daily_visitor_indices.push(idx);
+            }
+        }
+
+        // If we don't have enough visitors, sample more randomly
+        while daily_visitor_indices.len() < self.sessions_per_day / 2 {
+            let idx = rng.gen_range(0..self.visitor_pool.visitors.len());
+            if !daily_visitor_indices.contains(&idx) {
+                daily_visitor_indices.push(idx);
+            }
+        }
+
+        // Generate sessions for each visitor
+        for visitor_idx in &daily_visitor_indices {
+            let visitor = &self.visitor_pool.visitors[*visitor_idx];
+            // 1-3 sessions per visitor per day
+            let num_sessions = rng.gen_range(1..=3);
+
+            for _ in 0..num_sessions {
+                let session_rows = self.generate_session(&mut rng, visitor);
+                sessions.extend(session_rows);
+
+                if sessions.len() >= self.sessions_per_day {
+                    return sessions;
+                }
+            }
+        }
+
+        sessions
+    }
+
+    fn generate_session(&self, rng: &mut ChaCha8Rng, visitor: &Visitor) -> Vec<Session> {
+        let mut sessions = Vec::new();
+
+        let session_id = uuid_gen().generate(rng);
+
+        // Platform: 90% follows preference, 10% random
+        let platform = if rng.gen_bool(0.90) {
+            visitor.platform_preference
+        } else {
+            platform_gen().generate(rng)
+        };
+
+        let visit_source = visit_source_gen().generate(rng);
+        let visit_campaign = if visit_source.has_campaign() {
+            Some(campaign_gen().generate(rng))
+        } else {
+            None
+        };
+
+        // Widget views: log-normal, median ~5
+        let widget_views = log_normal(5.0, 1.0, 100).generate(rng);
+
+        // Generate 1-4 categories for this session (average ~2)
+        let num_categories = {
+            let r: f64 = rng.gen();
+            if r < 0.30 {
+                1
+            } else if r < 0.70 {
+                2
+            } else if r < 0.90 {
+                3
+            } else {
+                4
+            }
+        };
+
+        // Select distinct categories for this session
+        let mut selected_categories: Vec<ProductCategory> = Vec::with_capacity(num_categories);
+        while selected_categories.len() < num_categories {
+            let cat = product_category_gen().generate(rng);
+            if !selected_categories.contains(&cat) {
+                selected_categories.push(cat);
+            }
+        }
+
+        // Generate a row for each category
+        for &product_category in &selected_categories {
+            // Product views: log-normal, median ~3 (split across categories)
+            let product_views = log_normal(3.0 / num_categories as f64, 1.0, 50).generate(rng);
+
+            // Purchase: 80% zero, otherwise geometric
+            let product_purchase_count = if rng.gen_bool(0.80) {
+                0
+            } else {
+                geometric(0.5).generate(rng) + 1
+            };
+
+            // Revenue based on purchase count and category price
+            let product_revenue = if product_purchase_count > 0 {
+                let base_price = product_category.avg_price();
+                let price_factor = rng.gen_range(0.5..1.5);
+                (product_purchase_count as f64 * base_price as f64 * price_factor) as i32
+            } else {
+                0
+            };
+
+            sessions.push(Session {
+                visitor_id: visitor.id,
+                session_id,
+                platform,
+                visit_source,
+                visit_campaign: visit_campaign.clone(),
+                widget_views,
+                session_date: self.date,
+                product_views,
+                product_category,
+                product_revenue,
+                product_purchase_count,
+            });
+        }
+
+        sessions
+    }
+}
+
+/// Generate the visitor pool.
+fn generate_visitors(rng: &mut impl Rng, count: usize) -> Vec<Visitor> {
+    let uuid_g = uuid_gen();
+    let platform_g = platform_gen();
+
+    (0..count)
+        .map(|_| {
+            let id = uuid_g.generate(rng);
+            let platform_preference = platform_g.generate(rng);
+            // Power-law distribution for return probability
+            let return_probability = rng.gen::<f64>().powf(2.0) * 0.8;
+
+            Visitor {
+                id,
+                platform_preference,
+                return_probability,
+            }
+        })
+        .collect()
+}
+
 /// Campaign names (30 distinct values).
 const CAMPAIGNS: &[&str] = &[
     "summer_sale_2024",
@@ -215,13 +425,12 @@ impl SessionGenerator {
     /// * `num_days` - Number of days to generate sessions for
     /// * `target_sessions` - Approximate total number of sessions to generate
     pub fn new(seed: u64, start_date: NaiveDate, num_days: u32, target_sessions: usize) -> Self {
-        use rand::SeedableRng;
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
         // Calculate number of visitors needed
         // Assume average 3-7 sessions per visitor over the period
         let num_visitors = target_sessions / 5;
-        let visitors = Self::generate_visitors(&mut rng, num_visitors);
+        let visitors = generate_visitors(&mut rng, num_visitors);
 
         Self {
             start_date,
@@ -229,28 +438,6 @@ impl SessionGenerator {
             target_sessions,
             visitors,
         }
-    }
-
-    /// Generate the visitor pool.
-    fn generate_visitors(rng: &mut impl Rng, count: usize) -> Vec<Visitor> {
-        let uuid_g = uuid_gen();
-        let platform_g = platform_gen();
-
-        (0..count)
-            .map(|_| {
-                let id = uuid_g.generate(rng);
-                let platform_preference = platform_g.generate(rng);
-                // Power-law distribution for return probability
-                // Most visitors are one-time, few are frequent
-                let return_probability = rng.gen::<f64>().powf(2.0) * 0.8;
-
-                Visitor {
-                    id,
-                    platform_preference,
-                    return_probability,
-                }
-            })
-            .collect()
     }
 
     /// Generate all sessions as an iterator.
@@ -276,7 +463,6 @@ pub struct SessionIterator {
 
 impl SessionIterator {
     fn new(config: SessionGenerator, seed: u64) -> Self {
-        use rand::SeedableRng;
         let rng = ChaCha8Rng::seed_from_u64(seed.wrapping_add(1)); // Different seed from visitor generation
 
         Self {
