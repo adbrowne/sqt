@@ -4,6 +4,8 @@ This document tracks the implementation status of smelt, aligned with the spec i
 
 ## Current Status
 
+**Source Support Complete (January 3, 2026)**: Full `smelt.source()` support for external source tables defined in sources.yml, with LSP diagnostics, hover, and completion.
+
 **YAML Frontmatter Metadata Support Complete (December 31, 2025)**: Models can now specify configuration inline using YAML frontmatter, with SQL metadata taking precedence over smelt.yml.
 
 **Multi-Backend Architecture with Basic Incremental Materialization Complete (December 27, 2024)**: Parser, LSP, multi-backend CLI with DuckDB and Spark (stub) implementations, and basic incremental materialization support.
@@ -13,6 +15,7 @@ This document tracks the implementation status of smelt, aligned with the spec i
 SELECT * FROM smelt.ref('model_name')
 SELECT * FROM smelt.ref('events', filter => date > '2024-01-01')
 SELECT * FROM smelt.ref('orders', filter => status = 'active', limit => 100)
+SELECT * FROM smelt.source('raw.users')  -- External source tables
 ```
 
 ```bash
@@ -197,6 +200,110 @@ Cargo clippy passes with no warnings.
 **Multi-Model Discovery** (Future):
 - Currently only single-model per file fully supported
 - Multi-model parsing works but discovery needs enhancement
+
+---
+
+## ✅ Phase 17: Source Support (COMPLETED)
+
+**Completed**: January 3, 2026
+
+### What Was Implemented
+
+- **Parser support for `smelt.source()` function calls**
+  - `smelt.source('source.table')` syntax for external source references
+  - `SourceCall` AST wrapper in `smelt-parser/src/ast.rs`
+  - Extracts source name and table name from dotted format
+  - Position tracking for accurate diagnostics
+
+- **Database queries for source resolution**
+  - `sources_yaml` input query for raw YAML content
+  - `model_sources()` query extracts all source calls from a file
+  - `sources_config()` parses YAML into structured config
+  - `resolve_source()` resolves source.table to table definition
+  - All query results cached via Salsa for incremental compilation
+
+- **YAML configuration format**
+  ```yaml
+  sources:
+    - name: raw
+      database: analytics
+      schema: raw
+      tables:
+        - name: users
+          columns:
+            - name: id
+              type: INTEGER
+            - name: email
+              type: VARCHAR
+  ```
+
+- **LSP integration**
+  - Diagnostics for undefined sources with accurate positions
+  - Hover shows source schema with column definitions
+  - Autocomplete for source.table names inside `source('')`
+  - Sources.yml loaded on workspace initialization
+
+### Implementation Details
+
+**Parser** (`crates/smelt-parser/src/ast.rs`):
+- `SourceCall` struct wrapping `FunctionCall`
+- `from_function_call()` validates `smelt.source()` namespace
+- `qualified_name()` extracts full `source.table` string
+- `source_name()` / `table_name()` extract individual parts
+- `name_range()` for precise diagnostic positioning
+
+**Database** (`crates/smelt-db/src/lib.rs`):
+- `SourceLocation` struct with source_name, table_name, qualified_name, range
+- `SourcesConfig` / `SourceDef` / `SourceTableDef` / `SourceColumnDef` types
+- Serde deserialization for sources.yml format
+- `file_diagnostics()` updated to check undefined sources
+
+**LSP** (`crates/smelt-lsp/src/main.rs`):
+- `initialize()` loads sources.yml from workspace root
+- `hover()` shows source schema when hovering over source() calls
+- `completion()` provides source.table completions inside source('')
+- Completion context detection for `source('|')` pattern
+
+### Design Decisions
+
+**Dotted syntax** (`source.table`):
+- Single argument format like dbt's source()
+- Easier to type than two separate arguments
+- Clear visual distinction from model references
+
+**Column validation out of scope**:
+- Schema tracking infrastructure exists but validation not implemented
+- Applies to both refs AND sources
+- Would require database introspection or YAML column definitions
+- Marked as future work in "Column Schema Tracking" section
+
+**Sources.yml at workspace root**:
+- Consistent with smelt.yml location
+- Single source of truth for external tables
+- LSP loads on initialization for fast completions
+
+### Test Results
+
+All 172 tests passing:
+- 40 smelt-cli tests
+- 115 smelt-parser tests
+- 10 smelt-db tests
+- 5 smelt-backend-duckdb tests
+- 2 smelt-backend-spark tests
+
+Cargo clippy passes with no warnings.
+
+### Future Work
+
+**Source freshness tracking** (Future):
+- Track when sources were last updated
+- Warn on stale source data
+- Integration with source monitoring
+
+**Source documentation** (Future):
+- Rich descriptions in sources.yml
+- LSP hover shows documentation
+- Markdown support for column descriptions
 
 ---
 

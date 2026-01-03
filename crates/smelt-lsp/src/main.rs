@@ -72,27 +72,34 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        // Initialize all_files to empty first - ensures Salsa query is always set
+        // Initialize all_files and sources_yaml to empty first - ensures Salsa queries are always set
         // even if workspace folders aren't provided or models/ doesn't exist
         {
             let mut db = self.db.lock().await;
             db.set_all_files(Arc::new(Vec::new()));
+            db.set_sources_yaml(Arc::new(String::new()));
         }
 
         // Get workspace folders if provided
         if let Some(workspace_folders) = params.workspace_folders {
             let mut db = self.db.lock().await;
 
-            // Scan for all .sql files in workspace
+            // Scan for .sql files in models/ directory at workspace root
             for folder in workspace_folders {
                 if let Ok(path) = folder.uri.to_file_path() {
+                    // Load sources.yml from workspace root (same location as smelt.yml)
+                    let sources_path = path.join("sources.yml");
+                    if let Ok(sources_content) = std::fs::read_to_string(&sources_path) {
+                        db.set_sources_yaml(Arc::new(sources_content));
+                    }
+
+                    // Scan models/ directory
                     if let Ok(entries) = std::fs::read_dir(path.join("models")) {
                         let mut files = Vec::new();
 
                         for entry in entries.flatten() {
                             let entry_path = entry.path();
                             if entry_path.extension().and_then(|s| s.to_str()) == Some("sql") {
-                                // Read file content and set it in the database
                                 if let Ok(content) = std::fs::read_to_string(&entry_path) {
                                     db.set_file_text(entry_path.clone(), Arc::new(content));
                                     files.push(entry_path);
@@ -275,8 +282,9 @@ impl LanguageServer for Backend {
             offset
         };
 
-        // Check if hovering over a ref() call
+        // Check if hovering over a ref() or source() call
         if let Some(file) = AstFile::cast(syntax) {
+            // Check ref() calls
             for ref_call in file.refs() {
                 let range = ref_call.range();
                 let start: usize = range.start().into();
@@ -323,6 +331,71 @@ impl LanguageServer for Backend {
 
                                 content.push('\n');
                             }
+
+                            return Ok(Some(Hover {
+                                contents: HoverContents::Markup(MarkupContent {
+                                    kind: MarkupKind::Markdown,
+                                    value: content,
+                                }),
+                                range: None,
+                            }));
+                        }
+                    }
+                }
+            }
+
+            // Check source() calls
+            for source_call in file.sources() {
+                let range = source_call.range();
+                let start: usize = range.start().into();
+                let end: usize = range.end().into();
+
+                // Check if cursor is within this source call
+                if cursor_offset >= start && cursor_offset <= end {
+                    if let (Some(source_name), Some(table_name)) =
+                        (source_call.source_name(), source_call.table_name())
+                    {
+                        let qualified_name = source_call.qualified_name().unwrap_or_default();
+
+                        // Try to resolve the source
+                        if let Some(table_def) =
+                            db.resolve_source(source_name.clone(), table_name.clone())
+                        {
+                            // Format source info as markdown
+                            let mut content = format!("**Source: {}**\n\n", qualified_name);
+
+                            // Show table description if available
+                            if let Some(ref desc) = table_def.description {
+                                content.push_str(&format!("{}\n\n", desc));
+                            }
+
+                            if !table_def.columns.is_empty() {
+                                content.push_str("Columns:\n");
+                                for col in &table_def.columns {
+                                    content.push_str(&format!("- `{}`", col.name));
+                                    if let Some(ref dtype) = col.data_type {
+                                        content.push_str(&format!(" ({})", dtype));
+                                    }
+                                    if let Some(ref desc) = col.description {
+                                        content.push_str(&format!(" - {}", desc));
+                                    }
+                                    content.push('\n');
+                                }
+                            } else {
+                                content.push_str("*(No column definitions)*\n");
+                            }
+
+                            return Ok(Some(Hover {
+                                contents: HoverContents::Markup(MarkupContent {
+                                    kind: MarkupKind::Markdown,
+                                    value: content,
+                                }),
+                                range: None,
+                            }));
+                        } else {
+                            // Source not found - show error hover
+                            let content =
+                                format!("**Source: {}**\n\n⚠️ *Undefined source*", qualified_name);
 
                             return Ok(Some(Hover {
                                 contents: HoverContents::Markup(MarkupContent {
@@ -392,6 +465,39 @@ impl LanguageServer for Backend {
                     })
                     .collect()
             }
+            CompletionContext::InsideSource => {
+                // Complete source.table names
+                let config = db.sources_config();
+                let mut items = Vec::new();
+
+                for source in &config.sources {
+                    for table in &source.tables {
+                        let qualified_name = format!("{}.{}", source.name, table.name);
+                        let detail = table
+                            .description
+                            .clone()
+                            .unwrap_or_else(|| format!("Source table: {}", qualified_name));
+                        items.push(CompletionItem {
+                            label: qualified_name.clone(),
+                            kind: Some(CompletionItemKind::FILE),
+                            detail: Some(detail),
+                            documentation: if !table.columns.is_empty() {
+                                let cols: Vec<_> =
+                                    table.columns.iter().map(|c| c.name.as_str()).collect();
+                                Some(Documentation::String(format!(
+                                    "Columns: {}",
+                                    cols.join(", ")
+                                )))
+                            } else {
+                                None
+                            },
+                            ..Default::default()
+                        });
+                    }
+                }
+
+                items
+            }
             CompletionContext::ColumnName => {
                 // Complete column names from available columns
                 let available = db.available_columns(path);
@@ -440,8 +546,9 @@ impl LanguageServer for Backend {
 /// Completion context types
 #[derive(Debug)]
 enum CompletionContext {
-    InsideRef,  // Cursor inside ref('|')
-    ColumnName, // Cursor in a position where column name is expected
+    InsideRef,    // Cursor inside ref('|')
+    InsideSource, // Cursor inside source('|')
+    ColumnName,   // Cursor in a position where column name is expected
     None,
 }
 
@@ -449,6 +556,21 @@ enum CompletionContext {
 fn determine_completion_context(text: &str, offset: usize) -> CompletionContext {
     // Look backward from cursor to determine context
     let before_cursor = &text[..offset.min(text.len())];
+
+    // Check if we're inside source('')
+    // Simple heuristic: look for source(' before cursor and no closing )
+    if let Some(source_start) = before_cursor.rfind("source(") {
+        let after_source = &before_cursor[source_start..];
+        // Check if we're inside the quotes
+        let quote_count = after_source
+            .chars()
+            .filter(|&c| c == '\'' || c == '"')
+            .count();
+        if quote_count == 1 && !after_source.contains(')') {
+            // Odd number of quotes means we're inside a string, and no closing paren yet
+            return CompletionContext::InsideSource;
+        }
+    }
 
     // Check if we're inside ref('')
     // Simple heuristic: look for ref(' before cursor and no closing )

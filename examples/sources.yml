@@ -43,3 +43,14 @@ sources:
           - name: transaction_type
             type: VARCHAR
             description: Type of transaction (purchase, refund, etc.)
+      sessions:
+        description: User session data
+        columns:
+          - name: session_id
+            type: INTEGER
+          - name: user_id
+            type: INTEGER
+          - name: session_start
+            type: TIMESTAMP
+          - name: session_end
+            type: TIMESTAMP

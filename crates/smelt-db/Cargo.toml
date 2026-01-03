@@ -9,4 +9,6 @@ license.workspace = true
 salsa.workspace = true
 anyhow.workspace = true
 rowan.workspace = true
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
 smelt-parser = { path = "../smelt-parser" }
