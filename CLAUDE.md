@@ -241,6 +241,17 @@ The `examples/` directory contains SQL model examples demonstrating smelt capabi
 
 ## Development Workflow
 
+**IMPORTANT: Always Work on a Branch**
+
+This directory (`/Users/andrewbrowne/code/smelt`) should always track `main`. Before starting any work:
+
+1. Create a worktree for your feature/fix: `git worktree add ../smelt-<feature-name> -b <branch-name>`
+2. Work in the worktree directory, not this one
+3. This prevents conflicts when multiple Claude sessions are working simultaneously
+4. The main directory stays clean and always reflects the latest `main` branch
+
+If you find yourself on `main` with uncommitted changes, create a branch immediately before committing.
+
 **Git Commit Policy:**
 - **When running in Docker**: Create commits locally only. Push operations are disabled for safety.
 - **When running on host**: Normal git operations including push are available.
