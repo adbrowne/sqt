@@ -95,58 +95,6 @@ npm run package
 npm run watch
 ```
 
-## Docker Development Environment
-
-For running Claude Code in a sandboxed environment with all dependencies pre-installed:
-
-```bash
-# Easiest method - use the convenience script
-./claude.sh
-
-# Or manually:
-docker-compose up -d && docker-compose exec smelt-dev claude
-```
-
-**Why Use Docker for Claude Code:**
-- **Sandboxed Execution**: Claude runs in an isolated environment
-- **Pre-installed Dependencies**: Rust, Spark, Node.js all ready to go
-- **Git Push Disabled**: Commits stay local for your review
-- **No Credential Access**: Container can't access your SSH keys or GitHub tokens
-- **Source Code Synced**: Changes made by Claude sync to your host filesystem
-
-**Docker Environment Includes:**
-- Rust toolchain with clippy, rustfmt, rust-analyzer
-- Apache Spark 3.5.0 with Java 11 (for Spark backend testing)
-- Node.js 20 (for VSCode extension development)
-- Claude Code CLI
-- Git configured for local commits only
-- Source code mounted at `/workspace`
-- Build artifacts cached in Docker volumes for performance
-
-**Git Policy in Docker Container:**
-- Push operations are **disabled** (aliased to error message)
-- Git configured with Docker-specific identity
-- All commits stay in the container's local repository
-- Review commits on host with `git log` before manually pushing
-
-**Manual Development (without Claude):**
-```bash
-# Enter the container
-docker-compose exec smelt-dev bash
-
-# All commands work normally:
-cargo build
-cargo test
-cargo run --example example1_naive
-```
-
-**Stopping the container:**
-```bash
-docker-compose down
-```
-
-See **DOCKER.md** for detailed setup and usage instructions.
-
 ## Architecture
 
 ### High-Level Design
@@ -253,8 +201,8 @@ This directory (`/Users/andrewbrowne/code/smelt`) should always track `main`. Be
 If you find yourself on `main` with uncommitted changes, create a branch immediately before committing.
 
 **Git Commit Policy:**
-- **When running in Docker**: Create commits locally only. Push operations are disabled for safety.
-- **When running on host**: Normal git operations including push are available.
+- Normal git operations including push are available
+- Commit to branches, not directly to main (see above)
 
 ### For Parser/LSP Features
 
@@ -267,9 +215,7 @@ If you find yourself on `main` with uncommitted changes, create a branch immedia
 7. **Run `cargo clippy --all-targets` and fix all warnings**
 8. Run `cargo build` and `cargo test` to ensure everything compiles and passes
 9. Update docs/ROADMAP.md with completion status and date
-10. **Commit locally** with descriptive message (includes ROADMAP.md update)
-   - In Docker: Commits stay local, review on host before pushing
-   - On host: Can push directly if appropriate
+10. **Commit** with descriptive message (includes ROADMAP.md update)
 
 ### For Optimizer Features (Future)
 
